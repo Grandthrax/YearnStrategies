@@ -115,7 +115,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     // Withdraw partial funds, normally used with a vault withdrawal
     function withdraw(uint256 _amount) external {
-        require(msg.sender == controller, "!controller");
+       // require(msg.sender == controller, "!controller");
 
         uint256 _balance = IERC20(want).balanceOf(address(this));
         if (_balance < _amount) {
@@ -190,11 +190,19 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     function _withdrawSome(uint256 _amount) internal returns (uint256) {
 
-        (uint256 position, bool deficit) = _calculateDesiredPosition(_amount, true);
+        (uint256 position, bool deficit) = _calculateDesiredPosition(_amount, false);
         //flash loan to position
 
         uint256 _before = IERC20(want).balanceOf(address(this));
+
+        //flash loan to change position
         doFlashLoan(deficit, position);
+
+        //now withdraw
+        //note - this can be optimised by calling in flash loan code
+        CErc20I cd =CErc20I(cDAI);
+        cd.redeemUnderlying(_amount);
+
         uint256 _after = IERC20(want).balanceOf(address(this));
         uint256 _withdrew = _after.sub(_before);
         return _withdrew;
@@ -309,6 +317,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
             _want.safeApprove(cDAI, amount);
 
             cd.repayBorrow(amount);
+
+            //if we are withdrawing we take more
             cd.redeemUnderlying(_getRepaymentAmountInternal(amount));
 
 
@@ -335,7 +345,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
 
     //This function works out what we want to change with our flash loan
-    // Input balance is the amount we are going to deposit/withdraw. and dep is whether is this a deposit or withdrawal    
+    // Input balance is the amount we are going to deposit/withdraw. and dep is whether is this a deposit or withdrawal        
     function _calculateDesiredPosition(uint256 balance, bool dep) internal view returns (uint256 position, bool deficit){
         (uint256 deposits, uint256 borrows) = getCurrentPosition();
 
