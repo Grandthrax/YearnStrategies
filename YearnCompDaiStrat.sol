@@ -18,7 +18,8 @@ import "./Interfaces/DyDx/DydxFlashLoanBase.sol";
 import "./Interfaces/DyDx/ICallee.sol";
 
 
-//this strategies template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICompoundBasic.sol
+//This strategies starting template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICompoundBasic.sol
+//Dydx code with help from money legos
 contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     using SafeERC20 for IERC20;
     using Address for address;
@@ -128,7 +129,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     // Withdraw partial funds, normally used with a vault withdrawal
     function withdraw(uint256 _amount) external {
-        require(msg.sender == controller, "!controller");
+       require(msg.sender == controller, "!controller");
 
         uint256 _balance = IERC20(want).balanceOf(address(this));
         if (_balance < _amount) {
@@ -253,7 +254,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     }
 
 
-    //a function to deleverage tha does not rely on flash loans. it will take lots of calls but will eventually completely exit position
+    //a function to deleverage that does not rely on flash loans. it will take lots of calls but will eventually completely exit position
     //withdraw max possible. immediately repay debt
     function emergencyDeleverage() public {
         require(msg.sender == strategist || msg.sender == governance, "! strategist or governance");
@@ -272,7 +273,12 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
         cd.redeemUnderlying(toRedeem);
 
-        cd.repayBorrow(IERC20(want).balanceOf(address(this)));
+        IERC20 _want = IERC20(want);
+        uint balance = _want.balanceOf(address(this));
+         _want.safeApprove(cDAI, 0);
+         _want.safeApprove(cDAI, balance);
+
+        cd.repayBorrow(balance);
         
     }
 
@@ -489,6 +495,4 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
 
     }
-
-   
 }
