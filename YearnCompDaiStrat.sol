@@ -42,6 +42,8 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
     uint256 public withdrawalFee = 50;
     uint256 public constant withdrawalMax = 10000;
 
+    uint256 public leverageTarget = 3700;
+
     address public governance;
     address public controller;
     address public strategist;
@@ -88,7 +90,7 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
 
         //if we have no DAI nothing to be done
         if (_want > 0) {
-            (uint256 position, bool deficit) = _calcualteDesiredPosition(_want, true);
+            (uint256 position, bool deficit) = _calculateDesiredPosition(_want, true);
             //flash loan to position
 
          /*   IERC20(DAI).safeApprove(cDAI, 0);
@@ -228,10 +230,16 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
         controller = _controller;
     }
 
+    function setCollateralTarget(uint256 target) external {
+        require(msg.sender == strategist, "!strategist");
+        require(target < 3990, "Target too close to 4x leverage");
+        leverageTarget = target;
+    }
+
 
     ///flash loan stuff
 
-     function doFlashLoan(uint8 state, uint256 amount) public{
+     function doFlashLoan(uint8 state, uint256 amount) internal{
 
     
         ISoloMargin solo = ISoloMargin(SOLO);
@@ -295,9 +303,36 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
     }
 
 
-    //This function works out what we want to change about our flash loan
-    function _calcualteDesiredPosition(uint256 balance, bool deposit) internal returns (uint256 position, bool deficit){
+    //This function works out what we want to change with our flash loan
+    function _calculateDesiredPosition(uint256 balance, bool dep) internal returns (uint256 position, bool deficit){
         (uint256 deposits, uint256 borrows) = getCurrentPosition();
+
+        //we want to see how close to collateral target we are. 
+        //So we take deposits. Add or remove balance and see what desired lend is. then make difference
+
+        uint desiredBalance = 0;
+        if(dep){
+            desiredBalance = deposits.add(balance);
+        }else{
+            require(deposits > balance, "withdrawing more than balance");
+            desiredBalance = deposits.sub(balance);
+        }
+
+        //desired borrow is balance x leveraged targed-1. So if we want 4x leverage (max allowed). we want to borrow 3x desired balance
+        uint desiredBorrow = desiredBalance.mul(leverageTarget.sub(1000)).div(1000);
+
+
+        //now we see if we want to add or remove balance
+        // if the desired borrow is less than our current borrow we are in deficit. so we want to reduce position
+        if(desiredBorrow < borrows){
+            deficit = true;
+            position = borrows - desiredBorrow;
+        }else{
+            //otherwise we want to increase position
+             deficit = false;
+            position = desiredBorrow - borrows;
+        }
+
     }
 
     //returns the current position
