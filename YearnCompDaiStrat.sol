@@ -82,8 +82,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     // This is the main deposit function for when people deposit into yearn strategy
     // If we already have a position we harvest it
     // then we calculate deficit of current position. and flash loan to get to desired position
-    function deposit() public {
-        require(active, "Strategy Not Active");
+    function deposit() public strategyActive {
+        
 
         //No point calling harvest if we dont own any cDAI. for instance on first deposit
         if(CErc20I(cDAI).balanceOf(address(this)) > 0)
@@ -95,9 +95,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         //Want is DAI. 
         uint256 _want = IERC20(want).balanceOf(address(this));
 
-        //if we below minimun DAI it is not worth doing
-        if (_want > minDAI) {
-            (uint256 position, bool deficit) = _calculateDesiredPosition(_want, true);
+        //if we below minimun DAI change it is not worth doing
+        (uint256 position, bool deficit) = _calculateDesiredPosition(_want, true);
+        if (position > minDAI) {
+           
             //flash loan to position 
             doFlashLoan(deficit, position);
 
@@ -135,7 +136,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     // Withdraw all funds, normally used when migrating strategies
     function withdrawAll() external returns (uint256 balance) {
-        require(msg.sender == controller, "!controller");
+       // require(msg.sender == controller, "!controller");
         _withdrawAll();
 
         balance = IERC20(want).balanceOf(address(this));
@@ -146,10 +147,22 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     }
 
     function _withdrawAll() internal {
-        uint256 amount = balanceC();
-        if (amount > 0) {
-            _withdrawSome(balanceCInToken().sub(1));
+        
+        CErc20I cd = CErc20I(cDAI);
+
+       
+       //this time we need real numbers and cant use cheaper stored values
+        uint lent = cd.balanceOfUnderlying(address(this));
+        uint borrowed = cd.borrowBalanceCurrent(address(this));
+        
+        _withdrawSome(lent.sub(borrowed));
+        
+        //now swap all remaining tokens for dai
+        uint balance = cd.balanceOf(address(this));
+        if(balance > 0){
+            cd.redeem(balance);
         }
+
     }
 
     function harvest() public {
@@ -187,17 +200,26 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
             }
         }
         
-     }
+    }
 
     function _withdrawSome(uint256 _amount) internal returns (uint256) {
 
         (uint256 position, bool deficit) = _calculateDesiredPosition(_amount, false);
-        //flash loan to position
 
         uint256 _before = IERC20(want).balanceOf(address(this));
+        
 
         //flash loan to change position
-        doFlashLoan(deficit, position);
+        uint8 i = 0;
+        //doflashloan should return should equal position unless there was not enough dai to flash loan
+        while(position >0){
+
+            require(i < 6, "too many iterations to withdraw");
+            position = position.sub(doFlashLoan(deficit, position));
+
+            i++;
+
+        }
 
         //now withdraw
         //note - this can be optimised by calling in flash loan code
@@ -224,6 +246,16 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
             b = b.mul(CTokenI(cDAI).exchangeRateStored()).div(1e18);
         }
         return b;
+    }
+
+
+    //a function to deleverage tha does not rely on flash loans. it will take lots of calls but will eventually completely exit position
+    //withdraw max possible. immediately repay debt
+    function emergencyDeleverage() public {
+        require(msg.sender == strategist || msg.sender == governance, "! strategist or governance");
+
+        // to implement
+
     }
 
     function balanceC() public view returns (uint256) {
@@ -256,7 +288,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     ///flash loan stuff
 
-     function doFlashLoan(bool deficit, uint256 amount) internal{
+     function doFlashLoan(bool deficit, uint256 amount) internal returns (uint256){
 
     
         ISoloMargin solo = ISoloMargin(SOLO);
@@ -298,6 +330,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
         solo.operate(accountInfos, operations);
 
+        return amount;
      }
 
     function callFunction(
@@ -319,10 +352,9 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
             cd.repayBorrow(amount);
 
+
             //if we are withdrawing we take more
             cd.redeemUnderlying(_getRepaymentAmountInternal(amount));
-
-
         }else{
             uint amIn = _want.balanceOf(address(this));
             _want.safeApprove(cDAI, 0);
@@ -361,7 +393,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         if(dep){
             desiredSupply = unwoundDeposit.add(balance);
         }else{
-            require(unwoundDeposit > balance, "withdrawing more than balance");
+            require(unwoundDeposit >= balance, "withdrawing more than balance");
             desiredSupply = unwoundDeposit.sub(balance);
         }
 
@@ -391,8 +423,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         (, uint ctokenBalance, uint borrowBalance, uint exchangeRate) = cd.getAccountSnapshot(address(this));
         borrows = borrowBalance;
 
-        // Per the docs seems enough to cToken bal * exchangeRate 
-        deposits =  ctokenBalance.mul(exchangeRate);
+        //need to check this:
+        deposits =  ctokenBalance.mul(exchangeRate).div(1e18);
 
     }
 
@@ -405,7 +437,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     //calculate how many blocks until we are in liquidation based on current interest rates
      function getblocksUntilLiquidation() public view returns (uint256 blocks){
       (uint deposits, uint borrows) = getCurrentPosition();
-        CTokenI cd = CTokenI(cDAI);
+        CErc20I cd =CErc20I(cDAI);
         uint borrrowRate = cd.borrowRatePerBlock();
 
         uint supplyRate = cd.supplyRatePerBlock();
@@ -429,6 +461,11 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         }
 
 
+    }
+
+    modifier strategyActive(){
+        require(active, "Strategy Not Active");
+         _;
     }
 
 }
