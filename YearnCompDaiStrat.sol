@@ -8,7 +8,6 @@ import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import './Interfaces/Compound/CErc20I.sol';
 import './Interfaces/Compound/ComptrollerI.sol';
-import './Interfaces/Compound/Exponential.sol';
 
 import './Interfaces/UniswapInterfaces/IUniswapV2Router02.sol';
 
@@ -18,8 +17,8 @@ import "./Interfaces/DyDx/DydxFlashLoanBase.sol";
 import "./Interfaces/DyDx/ICallee.sol";
 
 
-//this strategies template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICurve.sol
-contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
+//this strategies template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICompoundBasic.sol
+contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
@@ -42,6 +41,7 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
     uint256 public withdrawalFee = 50;
     uint256 public constant withdrawalMax = 10000;
 
+    //multiple time 1000. so 4x target is 4000
     uint256 public leverageTarget = 3700;
 
     address public governance;
@@ -93,9 +93,8 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
             (uint256 position, bool deficit) = _calculateDesiredPosition(_want, true);
             //flash loan to position
 
-         /*   IERC20(DAI).safeApprove(cDAI, 0);
-            IERC20(DAI).safeApprove(cDAI, _want);
-            CErc20I(cDAI).mint(_want);*/
+            doFlashLoan(deficit, position);
+
         }
     }
 
@@ -112,6 +111,7 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
     // Withdraw partial funds, normally used with a vault withdrawal
     function withdraw(uint256 _amount) external {
         require(msg.sender == controller, "!controller");
+
         uint256 _balance = IERC20(want).balanceOf(address(this));
         if (_balance < _amount) {
             _amount = _withdrawSome(_amount.sub(_balance));
@@ -184,12 +184,12 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
      }
 
     function _withdrawSome(uint256 _amount) internal returns (uint256) {
-        uint256 b = balanceC();
-        uint256 bT = balanceCInToken();
-        // can have unintentional rounding errors
-        uint256 amount = (b.mul(_amount)).div(bT).add(1);
+
+        (uint256 position, bool deficit) = _calculateDesiredPosition(_amount, true);
+        //flash loan to position
+
         uint256 _before = IERC20(want).balanceOf(address(this));
-        _withdrawC(amount);
+        doFlashLoan(deficit, position);
         uint256 _after = IERC20(want).balanceOf(address(this));
         uint256 _withdrew = _after.sub(_before);
         return _withdrew;
@@ -216,8 +216,10 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
         return IERC20(cDAI).balanceOf(address(this));
     }
 
+    //need to be redone
     function balanceOf() public view returns (uint256) {
-        return balanceOfWant().add(balanceCInToken());
+       (uint deposits, uint borrows) =getCurrentPosition();
+        return balanceOfWant().add(deposits).sub(borrows);
     }
 
     function setGovernance(address _governance) external {
@@ -230,6 +232,7 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
         controller = _controller;
     }
 
+    //multiple time 1000. so 4x target is 4000
     function setCollateralTarget(uint256 target) external {
         require(msg.sender == strategist, "!strategist");
         require(target < 3990, "Target too close to 4x leverage");
@@ -239,21 +242,22 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
 
     ///flash loan stuff
 
-     function doFlashLoan(uint8 state, uint256 amount) internal{
+     function doFlashLoan(bool deficit, uint256 amount) internal{
 
     
         ISoloMargin solo = ISoloMargin(SOLO);
 
         uint256 marketId = _getMarketIdFromTokenAddress(SOLO, DAI);
-     
         
         uint256 repayAmount = _getRepaymentAmountInternal(amount);
-        // emit MyLog("Repaying ", repayAmount);
+      
         IERC20 token = IERC20(DAI);
+
+        require(token.balanceOf(SOLO) >= amount, "Not enough dai in DyDx. Try with smaller amount");
 
         token.safeApprove(SOLO, repayAmount);
 
-        bytes memory data = abi.encode(state);
+        bytes memory data = abi.encode(deficit, amount);
 
 
         // 1. Withdraw $
@@ -281,16 +285,29 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
         bytes memory data
     ) public override {
         
-        (uint8 _state) = abi.decode(data,(uint8));
+        (bool deficit, uint256 amount) = abi.decode(data,(bool, uint256));
+        IERC20 _want = IERC20(want);
+        CErc20I cd =CErc20I(cDAI);
 
-        if(_state == 0){
 
-        }else if(_state == 1){
+        //if in deficit we repay amount and then withdraw
+        if(deficit){
+            _want.safeApprove(cDAI, 0);
+            _want.safeApprove(cDAI, amount);
+
+            cd.repayBorrow(amount);
+            cd.redeemUnderlying(_getRepaymentAmountInternal(amount));
+
+
+        }else{
+
+            _want.safeApprove(cDAI, 0);
+            _want.safeApprove(cDAI, amount);
+
+            cd.mint(amount);
+            cd.borrow(_getRepaymentAmountInternal(amount));
 
         }
-
-       
-
     }
 
 
@@ -304,7 +321,7 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
 
 
     //This function works out what we want to change with our flash loan
-    function _calculateDesiredPosition(uint256 balance, bool dep) internal returns (uint256 position, bool deficit){
+    function _calculateDesiredPosition(uint256 balance, bool dep) internal view returns (uint256 position, bool deficit){
         (uint256 deposits, uint256 borrows) = getCurrentPosition();
 
         //we want to see how close to collateral target we are. 
@@ -340,12 +357,12 @@ contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
     //Does not accrue interest. 
     function getCurrentPosition() public view returns (uint deposits, uint borrows){
         CErc20I cd =CErc20I(cDAI);
-
        
         (, uint ctokenBalance, uint borrowBalance, uint exchangeRate) = cd.getAccountSnapshot(address(this));
         borrows = borrowBalance;
-        //copied from compound code
-        (,deposits) = mulScalarTruncate(Exp({mantissa:exchangeRate}), ctokenBalance);
+
+        //need to check this:
+        deposits =  ctokenBalance.mul(exchangeRate).div(1e18);
 
     }
 
