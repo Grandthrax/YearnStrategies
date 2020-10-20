@@ -369,4 +369,9 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     }
 
+     function getLiquidity() public view returns (uint liquidity){
+       ( , liquidity, ) = compound.getAccountLiquidity(address(this));
+
+    }
+
 }
