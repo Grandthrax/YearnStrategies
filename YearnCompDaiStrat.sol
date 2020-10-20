@@ -44,6 +44,9 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     //multiple time 1000. so 4x target is 4000
     uint256 public leverageTarget = 3700;
+    uint256 public minDAI = 100 * 1e18;
+    uint256 public minCompToSell = 5 * 1e17; //0.5 comp
+    bool public active = true;
 
     address public governance;
     address public controller;
@@ -79,6 +82,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     // If we already have a position we harvest it
     // then we calculate deficit of current position. and flash loan to get to desired position
     function deposit() public {
+        require(active, "Strategy Not Active");
 
         //No point calling harvest if we dont own any cDAI. for instance on first deposit
         if(CErc20I(cDAI).balanceOf(address(this)) > 0)
@@ -90,11 +94,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         //Want is DAI. 
         uint256 _want = IERC20(want).balanceOf(address(this));
 
-        //if we have no DAI nothing to be done
-        if (_want > 0) {
+        //if we below minimun DAI it is not worth doing
+        if (_want > minDAI) {
             (uint256 position, bool deficit) = _calculateDesiredPosition(_want, true);
-            //flash loan to position
-
+            //flash loan to position 
             doFlashLoan(deficit, position);
 
         }
@@ -162,7 +165,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
         uint256 _comp = IERC20(comp).balanceOf(address(this));
         
-        if (_comp > 0) {
+        if (_comp > minCompToSell) {
 
             //for safety we set approval to 0 and then reset to required amount
             IERC20(comp).safeApprove(uni, 0);
@@ -251,11 +254,18 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
         uint256 marketId = _getMarketIdFromTokenAddress(SOLO, DAI);
         
-        uint256 repayAmount = _getRepaymentAmountInternal(amount);
+       
       
         IERC20 token = IERC20(DAI);
 
-        require(token.balanceOf(SOLO) >= amount, "Not enough dai in DyDx. Try with smaller amount");
+        // Not enough DAI in DyDx. So we take all we can
+        uint amountInSolo = token.balanceOf(SOLO);
+        if(amountInSolo < amount)
+        {
+            amount = amountInSolo;
+        }
+
+        uint256 repayAmount = _getRepaymentAmountInternal(amount);
 
         token.safeApprove(SOLO, repayAmount);
 
@@ -325,33 +335,38 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
 
     //This function works out what we want to change with our flash loan
+    // Input balance is the amount we are going to deposit/withdraw. and dep is whether is this a deposit or withdrawal    
     function _calculateDesiredPosition(uint256 balance, bool dep) internal view returns (uint256 position, bool deficit){
         (uint256 deposits, uint256 borrows) = getCurrentPosition();
+
+
+        //when we unwind we end up with the difference between borrow and supply
+        uint unwoundDeposit = deposits.sub(borrows);
 
         //we want to see how close to collateral target we are. 
         //So we take deposits. Add or remove balance and see what desired lend is. then make difference
 
-        uint desiredBalance = 0;
+        uint desiredSupply = 0;
         if(dep){
-            desiredBalance = deposits.add(balance);
+            desiredSupply = unwoundDeposit.add(balance);
         }else{
-            require(deposits > balance, "withdrawing more than balance");
-            desiredBalance = deposits.sub(balance);
+            require(unwoundDeposit > balance, "withdrawing more than balance");
+            desiredSupply = unwoundDeposit.sub(balance);
         }
 
         //desired borrow is balance x leveraged targed-1. So if we want 4x leverage (max allowed). we want to borrow 3x desired balance
-        uint desiredBorrow = desiredBalance.mul(leverageTarget.sub(1000)).div(1000);
+        uint desiredBorrow = desiredSupply.mul(leverageTarget.sub(1000)).div(1000);
 
 
         //now we see if we want to add or remove balance
         // if the desired borrow is less than our current borrow we are in deficit. so we want to reduce position
         if(desiredBorrow < borrows){
             deficit = true;
-            position = borrows - desiredBorrow;
+            position = borrows.sub(desiredBorrow);
         }else{
             //otherwise we want to increase position
              deficit = false;
-            position = desiredBorrow - borrows;
+            position = desiredBorrow.sub(borrows);
         }
 
     }
