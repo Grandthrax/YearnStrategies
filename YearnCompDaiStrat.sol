@@ -405,7 +405,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     //calculate how many blocks until we are in liquidation based on current interest rates
      function getblocksUntilLiquidation() public view returns (uint256 blocks){
       (uint deposits, uint borrows) = getCurrentPosition();
-        CErc20I cd =CErc20I(cDAI);
+        CTokenI cd = CTokenI(cDAI);
         uint borrrowRate = cd.borrowRatePerBlock();
 
         uint supplyRate = cd.supplyRatePerBlock();
