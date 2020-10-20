@@ -7,7 +7,6 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import './Interfaces/Compound/CErc20I.sol';
-import './Interfaces/Compound/CTokenI.sol';
 import './Interfaces/Compound/ComptrollerI.sol';
 
 import './Interfaces/UniswapInterfaces/IUniswapV2Router02.sol';
@@ -405,7 +404,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     //calculate how many blocks until we are in liquidation based on current interest rates
      function getblocksUntilLiquidation() public view returns (uint256 blocks){
       (uint deposits, uint borrows) = getCurrentPosition();
-        CTokenI cd = CTokenI(cDAI);
+        CErc20I cd = CErc20I(cDAI);
         uint borrrowRate = cd.borrowRatePerBlock();
 
         uint supplyRate = cd.supplyRatePerBlock();

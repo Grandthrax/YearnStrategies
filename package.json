@@ -2,13 +2,17 @@
   "name": "yearnStrat",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "truffle-config.js",
   "dependencies": {
-    "@openzeppelin/contracts": "^3.2.0"
+    "@openzeppelin/contracts": "^3.2.0",
+    "@truffle/hdwallet-provider": "^1.1.1",
+    "dotenv": "^8.2.0"
   },
   "devDependencies": {},
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "fork-infura": "ganache-cli -f wss://mainnet.infura.io/ws/v3/{YOUR_ID} -u 0x55d3412c741Bd6A3871c48a2f1987BBB5c4807D4",
+    "deployMainnetFork": "truffle migrate --reset --network mainnetFork",
+    "deployLocal": "truffle migrate --reset --network development"
   },
   "repository": {
     "type": "git",
