@@ -82,6 +82,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         //No point calling harvest if we dont own any cDAI. for instance on first deposit
         if(CErc20I(cDAI).balanceOf(address(this)) > 0)
         {
+          
             _harvest();
         }
 
@@ -99,14 +100,14 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     }
 
     // Controller only function for creating additional rewards from dust
-    function withdraw(IERC20 _asset) external returns (uint256 balance) {
+   /* function withdraw(IERC20 _asset) external returns (uint256 balance) {
         require(msg.sender == controller, "!controller");
         require(want != address(_asset), "want");
         require(cDAI != address(_asset), "cDAI");
         require(comp != address(_asset), "comp");
         balance = _asset.balanceOf(address(this));
         _asset.safeTransfer(controller, balance);
-    }
+    }*/
 
     // Withdraw partial funds, normally used with a vault withdrawal
     function withdraw(uint256 _amount) external {
@@ -289,9 +290,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         IERC20 _want = IERC20(want);
         CErc20I cd =CErc20I(cDAI);
 
-
+        
         //if in deficit we repay amount and then withdraw
         if(deficit){
+           
             _want.safeApprove(cDAI, 0);
             _want.safeApprove(cDAI, amount);
 
@@ -300,11 +302,12 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
 
         }else{
-
+            uint amIn = _want.balanceOf(address(this));
             _want.safeApprove(cDAI, 0);
-            _want.safeApprove(cDAI, amount);
+            _want.safeApprove(cDAI, amIn);
 
-            cd.mint(amount);
+            cd.mint(amIn);
+
             cd.borrow(_getRepaymentAmountInternal(amount));
 
         }
