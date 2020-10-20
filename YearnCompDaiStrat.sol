@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import './Interfaces/Compound/CErc20I.sol';
+import './Interfaces/Compound/CTokenI.sol';
 import './Interfaces/Compound/ComptrollerI.sol';
 
 import './Interfaces/UniswapInterfaces/IUniswapV2Router02.sol';
