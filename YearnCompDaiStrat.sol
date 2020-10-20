@@ -390,8 +390,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         (, uint ctokenBalance, uint borrowBalance, uint exchangeRate) = cd.getAccountSnapshot(address(this));
         borrows = borrowBalance;
 
-        //need to check this:
-        deposits =  ctokenBalance.mul(exchangeRate).div(1e18);
+        // Per the docs seems enough to cToken bal * exchangeRate 
+        deposits =  ctokenBalance.mul(exchangeRate);
 
     }
 
