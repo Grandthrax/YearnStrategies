@@ -26,6 +26,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     address public constant want = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
     address public constant DAI = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
     address private constant SOLO = 0x1E0447b19BB6EcFdAe1e4AE1694b0C3659614e4e;
+
     // Comptroller address for compound.finance
     ComptrollerI public constant compound = ComptrollerI(0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B); 
 
@@ -371,6 +372,36 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
      function getLiquidity() public view returns (uint liquidity){
        ( , liquidity, ) = compound.getAccountLiquidity(address(this));
+
+    }
+
+
+    //calculate how many blocks until we are in liquidation based on current interest rates
+     function getblocksUntilLiquidation() public view returns (uint256 blocks){
+      (uint deposits, uint borrows) = getCurrentPosition();
+        CErc20I cd =CErc20I(cDAI);
+        uint borrrowRate = cd.borrowRatePerBlock();
+
+        uint supplyRate = cd.supplyRatePerBlock();
+
+        uint borrowAccural = borrrowRate.mul(borrows);
+        uint supplyAccrual = supplyRate.mul(deposits);
+
+        //we will never be ion lquidation
+        if(borrowAccural <= supplyAccrual ){
+            blocks = uint256(-1);
+        }else{
+            uint accrual = borrowAccural.sub(supplyAccrual).div(1e18);
+
+            //we are in liquidation when borrows = 75% of deposits
+            uint amountToGo = (deposits.mul(75).div(100)).sub(borrows);
+         
+            blocks = amountToGo.div(accrual);
+
+            //we need to go back to last time interest was accrued
+            blocks = blocks.sub(block.number.sub(cd.accrualBlockNumber()));
+        }
+
 
     }
 
