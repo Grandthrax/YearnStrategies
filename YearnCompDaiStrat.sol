@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import './Interfaces/Compound/CErc20I.sol';
 import './Interfaces/Compound/ComptrollerI.sol';
+import './Interfaces/Compound/Exponential.sol';
 
 import './Interfaces/UniswapInterfaces/IUniswapV2Router02.sol';
 
@@ -16,7 +17,9 @@ import "./Interfaces/Yearn/IController.sol";
 import "./Interfaces/DyDx/DydxFlashLoanBase.sol";
 import "./Interfaces/DyDx/ICallee.sol";
 
-contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
+
+//this strategies template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICurve.sol
+contract YearnCompDaiStrategy is Exponential, DydxFlashloanBase, ICallee {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
@@ -68,12 +71,24 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         performanceFee = _performanceFee;
     }
 
-    function deposit() public {
-        uint256 _want = IERC20(want).balanceOf(address(this));
-        if (_want > 0) {
-            
-            //check position
 
+    // This is the main deposit function for when people deposit into yearn strategy
+    // If we already have a position we harvest it
+    // then we calculate deficit of current position. and flash loan to get to desired position
+    function deposit() public {
+
+        //No point calling harvest if we dont own any cDAI. for instance on first deposit
+        if(CErc20I(cDAI).balanceOf(address(this)) > 0)
+        {
+            _harvest();
+        }
+
+        //Want is DAI. 
+        uint256 _want = IERC20(want).balanceOf(address(this));
+
+        //if we have no DAI nothing to be done
+        if (_want > 0) {
+            (uint256 position, bool deficit) = _calcualteDesiredPosition(_want, true);
             //flash loan to position
 
          /*   IERC20(DAI).safeApprove(cDAI, 0);
@@ -131,9 +146,21 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     function harvest() public {
         require(msg.sender == strategist || msg.sender == governance, "!authorized");
-       // compound.claimComp(address(this));
+        //harvest and deposit public calls do the same thing
+        deposit();    
+       
+    }
+
+    //internal harvest. Public harvest calls deposit function
+     function _harvest() internal {
+         //claim comp accrued
+        _claimComp();
+
         uint256 _comp = IERC20(comp).balanceOf(address(this));
+        
         if (_comp > 0) {
+
+            //for safety we set approval to 0 and then reset to required amount
             IERC20(comp).safeApprove(uni, 0);
             IERC20(comp).safeApprove(uni, _comp);
 
@@ -142,15 +169,17 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
             path[1] = weth;
             path[2] = want;
 
-            IUniswapV2Router02(uni).swapExactTokensForTokens(_comp, uint256(0), path, address(this), now.add(1800));
+            (uint[] memory amounts) = IUniswapV2Router02(uni).swapExactTokensForTokens(_comp, uint256(0), path, address(this), now.add(1800));
+
+            //amounts is array of the input token amount and all subsequent output token amounts
+            uint256 _want = amounts[2];
+            if (_want > 0) {
+                uint256 _fee = _want.mul(performanceFee).div(performanceMax);
+                IERC20(want).safeTransfer(IController(controller).rewards(), _fee);
+            }
         }
-        uint256 _want = IERC20(want).balanceOf(address(this));
-        if (_want > 0) {
-            uint256 _fee = _want.mul(performanceFee).div(performanceMax);
-            IERC20(want).safeTransfer(IController(controller).rewards(), _fee);
-            deposit();
-        }
-    }
+        
+     }
 
     function _withdrawSome(uint256 _amount) internal returns (uint256) {
         uint256 b = balanceC();
@@ -255,4 +284,34 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
        
 
     }
+
+
+    function _claimComp() internal {
+      
+        CTokenI[] memory tokens = new CTokenI[](1);
+        tokens[0] =  CTokenI(cDAI);
+
+        compound.claimComp(address(this), tokens);
+    }
+
+
+    //This function works out what we want to change about our flash loan
+    function _calcualteDesiredPosition(uint256 balance, bool deposit) internal returns (uint256 position, bool deficit){
+        (uint256 deposits, uint256 borrows) = getCurrentPosition();
+    }
+
+    //returns the current position
+    //WARNING - this returns just the balance at last time someone touched the cDAI token. 
+    //Does not accrue interest. 
+    function getCurrentPosition() public view returns (uint deposits, uint borrows){
+        CErc20I cd =CErc20I(cDAI);
+
+       
+        (, uint ctokenBalance, uint borrowBalance, uint exchangeRate) = cd.getAccountSnapshot(address(this));
+        borrows = borrowBalance;
+        //copied from compound code
+        (,deposits) = mulScalarTruncate(Exp({mantissa:exchangeRate}), ctokenBalance);
+
+    }
+
 }

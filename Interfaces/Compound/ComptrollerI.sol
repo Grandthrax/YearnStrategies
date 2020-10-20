@@ -1,5 +1,7 @@
 pragma solidity >=0.5.0;
 
+import './CTokenI.sol';
+
 interface ComptrollerI {
 
     function enterMarkets(address[] calldata cTokens) external returns (uint[] memory);
@@ -66,5 +68,10 @@ interface ComptrollerI {
         uint repayAmount) external view returns (uint, uint);
 
     function getAccountLiquidity(address account) external view returns (uint, uint, uint);
+
+
+    /***  Comp claims ****/
+    function claimComp(address holder) external;
+    function claimComp(address holder, CTokenI[] memory cTokens) external;
 
 }
