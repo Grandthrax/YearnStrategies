@@ -117,18 +117,18 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     }
 
     // Controller only function for creating additional rewards from dust
-   /* function withdraw(IERC20 _asset) external returns (uint256 balance) {
+    function withdraw(IERC20 _asset) external returns (uint256 balance) {
         require(msg.sender == controller, "!controller");
         require(want != address(_asset), "want");
         require(cDAI != address(_asset), "cDAI");
         require(comp != address(_asset), "comp");
         balance = _asset.balanceOf(address(this));
         _asset.safeTransfer(controller, balance);
-    }*/
+    }
 
     // Withdraw partial funds, normally used with a vault withdrawal
     function withdraw(uint256 _amount) external {
-       // require(msg.sender == controller, "!controller");
+        require(msg.sender == controller, "!controller");
 
         uint256 _balance = IERC20(want).balanceOf(address(this));
         if (_balance < _amount) {
@@ -147,7 +147,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     // Withdraw all funds, normally used when migrating strategies
     function withdrawAll() external returns (uint256 balance) {
-       // require(msg.sender == controller, "!controller");
+        require(msg.sender == controller, "!controller");
         _withdrawAll();
 
         balance = IERC20(want).balanceOf(address(this));
