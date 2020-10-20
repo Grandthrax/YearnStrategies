@@ -17,7 +17,8 @@ import "./Interfaces/DyDx/DydxFlashLoanBase.sol";
 import "./Interfaces/DyDx/ICallee.sol";
 
 
-//this strategies template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICompoundBasic.sol
+//This strategies starting template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICompoundBasic.sol
+//Dydx code with help from money legos
 contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     using SafeERC20 for IERC20;
     using Address for address;
@@ -81,7 +82,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     // This is the main deposit function for when people deposit into yearn strategy
     // If we already have a position we harvest it
     // then we calculate deficit of current position. and flash loan to get to desired position
-    function deposit() public strategyActive {
+    function deposit() public {
         
 
         //No point calling harvest if we dont own any cDAI. for instance on first deposit
@@ -92,10 +93,21 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         }
 
         //Want is DAI. 
-        uint256 _want = IERC20(want).balanceOf(address(this));
+        uint256 position; 
+        bool deficit;
+        uint256 _want;
+        if(active){
+            _want = IERC20(want).balanceOf(address(this));
+            (position, deficit) = _calculateDesiredPosition(_want, true);
+        }else{
+            //if strategy is not active we want to deleverage as much as possible in one flash loan
+            deficit = true;
+            position = netBalanceLent();
+        }
+        
 
-        //if we below minimun DAI change it is not worth doing
-        (uint256 position, bool deficit) = _calculateDesiredPosition(_want, true);
+        //if we below minimun DAI change it is not worth doing        
+        
         if (position > minDAI) {
            
             //flash loan to position 
@@ -105,18 +117,18 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     }
 
     // Controller only function for creating additional rewards from dust
-   /* function withdraw(IERC20 _asset) external returns (uint256 balance) {
+    function withdraw(IERC20 _asset) external returns (uint256 balance) {
         require(msg.sender == controller, "!controller");
         require(want != address(_asset), "want");
         require(cDAI != address(_asset), "cDAI");
         require(comp != address(_asset), "comp");
         balance = _asset.balanceOf(address(this));
         _asset.safeTransfer(controller, balance);
-    }*/
+    }
 
     // Withdraw partial funds, normally used with a vault withdrawal
     function withdraw(uint256 _amount) external {
-       // require(msg.sender == controller, "!controller");
+       require(msg.sender == controller, "!controller");
 
         uint256 _balance = IERC20(want).balanceOf(address(this));
         if (_balance < _amount) {
@@ -135,7 +147,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     // Withdraw all funds, normally used when migrating strategies
     function withdrawAll() external returns (uint256 balance) {
-       // require(msg.sender == controller, "!controller");
+        require(msg.sender == controller, "!controller");
         _withdrawAll();
 
         balance = IERC20(want).balanceOf(address(this));
@@ -234,27 +246,39 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         return IERC20(want).balanceOf(address(this));
     }
 
-    function _withdrawC(uint256 amount) internal {
-        CErc20I(cDAI).redeem(amount);
-    }
 
-    function balanceCInToken() public view returns (uint256) {
-        // Mantisa 1e18 to decimals
-        uint256 b = balanceC();
-        if (b > 0) {
-            b = b.mul(CTokenI(cDAI).exchangeRateStored()).div(1e18);
-        }
-        return b;
+    function netBalanceLent() public view returns (uint256) {
+         (uint deposits, uint borrows) =getCurrentPosition();
+        return deposits.sub(borrows);
     }
 
 
-    //a function to deleverage tha does not rely on flash loans. it will take lots of calls but will eventually completely exit position
+    //a function to deleverage that does not rely on flash loans. it will take lots of calls but will eventually completely exit position
     //withdraw max possible. immediately repay debt
     function emergencyDeleverage() public {
         require(msg.sender == strategist || msg.sender == governance, "! strategist or governance");
 
-        // to implement
+        //minimun balance of lent is borrowed/ 0.75 
+         CErc20I cd =CErc20I(cDAI);
+         uint lent = cd.balanceOfUnderlying(address(this));
 
+        //we can use storeed because interest was accrued in last line
+         uint borrowed = cd.borrowBalanceStored(address(this));
+
+         uint theoreticalLent = borrowed.mul(100).div(75);
+
+         uint toRedeem = lent.sub(theoreticalLent);
+
+
+        cd.redeemUnderlying(toRedeem);
+
+        IERC20 _want = IERC20(want);
+        uint balance = _want.balanceOf(address(this));
+         _want.safeApprove(cDAI, 0);
+         _want.safeApprove(cDAI, balance);
+
+        cd.repayBorrow(balance);
+        
     }
 
     function balanceC() public view returns (uint256) {
@@ -432,6 +456,15 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     }
 
+    function disableLeverage() external {
+        require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
+        active = false;
+    }
+    function enableLeverage() external {
+        require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
+        active = true;
+    }
+
 
     //calculate how many blocks until we are in liquidation based on current interest rates
      function getblocksUntilLiquidation() public view returns (uint256 blocks){
@@ -461,10 +494,4 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
 
     }
-
-    modifier strategyActive(){
-        require(active, "Strategy Not Active");
-         _;
-    }
-
 }
