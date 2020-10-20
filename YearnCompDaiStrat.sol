@@ -1,4 +1,4 @@
-pragma solidity >0.6.9;
+pragma solidity ^0.6.9;
 pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -6,15 +6,15 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-import '../Contract/UniswapInterfaces/IUniswapV2Router02.sol';
+import './Interfaces/Compound/CErc20I.sol';
+import './Interfaces/Compound/ComptrollerI.sol';
 
-import '../Contract/Interfaces/CErc20I.sol';
-import '../Contract/Interfaces/ComptrollerI.sol';
+import './Interfaces/UniswapInterfaces/IUniswapV2Router02.sol';
 
-import "../Contract/Interfaces/yearn/IController.sol";
+import "./Interfaces/Yearn/IController.sol";
 
-import "../Contract/DydxFlashLoanBase.sol";
-import "../Contract/Interfaces/ICallee.sol";
+import "./Interfaces/DyDx/DydxFlashLoanBase.sol";
+import "./Interfaces/DyDx/ICallee.sol";
 
 contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     using SafeERC20 for IERC20;
