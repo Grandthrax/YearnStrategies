@@ -1,9 +1,11 @@
-const dydxMainnet = require('./dydx-mainnet.json');
-const tokensMainnet = require('./tokens-mainnet.json');
+const dydxMainnet = require("./dydx-mainnet.json");
+const IcomptrollerMainnet = require("./icompt-mainnet.json");
+const tokensMainnet = require("./tokens-mainnet.json");
 
 module.exports = {
   mainnet: {
     dydx: dydxMainnet,
-    tokens: tokensMainnet
-  }
+    tokens: tokensMainnet,
+    comptroller: IcomptrollerMainnet,
+  },
 };

@@ -10,7 +10,7 @@
   },
   "devDependencies": {},
   "scripts": {
-    "fork-infura": "ganache-cli -f wss://mainnet.infura.io/ws/v3/{YOUR_ID} -u 0x55d3412c741Bd6A3871c48a2f1987BBB5c4807D4",
+    "fork-infura": "ganache-cli -f wss://mainnet.infura.io/ws/v3/{YOUR_ID} -u 0x7a8edc710ddeadddb0b539de83f3a306a621e823",
     "deployMainnetFork": "truffle migrate --reset --network mainnetFork",
     "deployLocal": "truffle migrate --reset --network development"
   },
