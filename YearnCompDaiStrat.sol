@@ -82,7 +82,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     // This is the main deposit function for when people deposit into yearn strategy
     // If we already have a position we harvest it
     // then we calculate deficit of current position. and flash loan to get to desired position
-    function deposit() public strategyActive {
+    function deposit() public {
         
 
         //No point calling harvest if we dont own any cDAI. for instance on first deposit
@@ -93,10 +93,21 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         }
 
         //Want is DAI. 
-        uint256 _want = IERC20(want).balanceOf(address(this));
+        uint256 position; 
+        bool deficit;
+        uint256 _want;
+        if(active){
+            _want = IERC20(want).balanceOf(address(this));
+            (position, deficit) = _calculateDesiredPosition(_want, true);
+        }else{
+            //if strategy is not active we want to deleverage as much as possible in one flash loan
+            deficit = true;
+            position = netBalanceLent();
+        }
+        
 
-        //if we below minimun DAI change it is not worth doing
-        (uint256 position, bool deficit) = _calculateDesiredPosition(_want, true);
+        //if we below minimun DAI change it is not worth doing        
+        
         if (position > minDAI) {
            
             //flash loan to position 
@@ -235,17 +246,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         return IERC20(want).balanceOf(address(this));
     }
 
-    function _withdrawC(uint256 amount) internal {
-        CErc20I(cDAI).redeem(amount);
-    }
 
-    function balanceCInToken() public view returns (uint256) {
-        // Mantisa 1e18 to decimals
-        uint256 b = balanceC();
-        if (b > 0) {
-            b = b.mul(CTokenI(cDAI).exchangeRateStored()).div(1e18);
-        }
-        return b;
+    function netBalanceLent() public view returns (uint256) {
+         (uint deposits, uint borrows) =getCurrentPosition();
+        return deposits.sub(borrows);
     }
 
 
@@ -254,8 +258,22 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     function emergencyDeleverage() public {
         require(msg.sender == strategist || msg.sender == governance, "! strategist or governance");
 
-        // to implement
+        //minimun balance of lent is borrowed/ 0.75 
+         CErc20I cd =CErc20I(cDAI);
+         uint lent = cd.balanceOfUnderlying(address(this));
 
+        //we can use storeed because interest was accrued in last line
+         uint borrowed = cd.borrowBalanceStored(address(this));
+
+         uint theoreticalLent = borrowed.mul(100).div(75);
+
+         uint toRedeem = lent.sub(theoreticalLent);
+
+
+        cd.redeemUnderlying(toRedeem);
+
+        cd.repayBorrow(IERC20(want).balanceOf(address(this)));
+        
     }
 
     function balanceC() public view returns (uint256) {
@@ -433,6 +451,15 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     }
 
+    function disableLeverage() external {
+        require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
+        active = false;
+    }
+    function enableLeverage() external {
+        require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
+        active = true;
+    }
+
 
     //calculate how many blocks until we are in liquidation based on current interest rates
      function getblocksUntilLiquidation() public view returns (uint256 blocks){
@@ -463,9 +490,5 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     }
 
-    modifier strategyActive(){
-        require(active, "Strategy Not Active");
-         _;
-    }
-
+   
 }
