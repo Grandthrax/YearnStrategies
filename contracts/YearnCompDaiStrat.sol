@@ -37,7 +37,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     // used for comp <> weth <> dai route
     address public constant weth = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2); 
 
-    uint256 public performanceFee = 500;
+    uint256 public performanceFee = 450;
+    uint256 public strategistReward = 50;
     uint256 public constant performanceMax = 10000;
 
     uint256 public withdrawalFee = 50;
@@ -77,6 +78,12 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         require(msg.sender == governance, "!governance");
         performanceFee = _performanceFee;
     }
+
+    function setStrategistReward(uint256 _strategistReward) external {
+        require(msg.sender == governance, "!governance");
+        strategistReward = _strategistReward;
+    }
+
 
 
     // This is the main deposit function for when people deposit into yearn strategy
@@ -206,7 +213,9 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
             uint256 _want = amounts[2];
             if (_want > 0) {
                 uint256 _fee = _want.mul(performanceFee).div(performanceMax);
+                uint256 _reward = _want.mul(strategistReward).div(performanceMax);
                 IERC20(want).safeTransfer(IController(controller).rewards(), _fee);
+                IERC20(want).safeTransfer(strategist, _reward);
             }
         }
         
