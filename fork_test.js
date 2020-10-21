@@ -44,14 +44,14 @@ const test = async () => {
       .transfer(StrategyContract.options.address, AMOUNT_DEPOSIT_WEI)
       .send({ from: unlockAddress });
 
-    const tx_deposit = await StrategyContract.methods.deposit();
+    let tx = await StrategyContract.methods.deposit();
 
     const [gasPrice, gasCost] = await Promise.all([
       web3.eth.getGasPrice(),
-      tx_deposit.estimateGas({ from: unlockAddress }),
+      tx.estimateGas({ from: unlockAddress }),
     ]);
 
-    const data = tx_deposit.encodeABI();
+    let data = tx.encodeABI();
 
     const txData = {
       from: unlockAddress,
@@ -81,22 +81,16 @@ const test = async () => {
     console.log(AFTER_DEPOSIT);
 
     // -- Test withdraw(uint256) method --
-    const tx_withdraw = await StrategyContract.methods.withdraw(
-      AMOUNT_WITHDRAW_WEI
-    );
+    tx = await StrategyContract.methods.withdraw(AMOUNT_WITHDRAW_WEI);
 
-    const gasPrice_withdraw = await tx_withdraw.estimateGas({
-      from: unlockAddress,
-    });
-
-    const data_withdraw = tx_withdraw.encodeABI();
+    data = tx.encodeABI();
 
     const txData_withdraw = {
       from: unlockAddress,
       to: StrategyContract.options.address,
-      data_withdraw,
-      gas: gasCost,
-      gasPrice: gasPrice_withdraw,
+      data,
+      gas: 4100000,
+      gasPrice,
     };
 
     const receipt_withdraw = await web3.eth.sendTransaction(txData_withdraw);
