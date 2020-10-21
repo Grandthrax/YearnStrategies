@@ -73,5 +73,6 @@ interface ComptrollerI {
     /***  Comp claims ****/
     function claimComp(address holder) external;
     function claimComp(address holder, CTokenI[] memory cTokens) external;
+    function markets(address ctoken) external view returns (bool, uint, bool);
 
 }

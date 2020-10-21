@@ -45,7 +45,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     uint256 public constant withdrawalMax = 10000;
 
     //multiple time 1000. so 4x target is 4000
-    uint256 public leverageTarget = 3700;
+    //uint256 public leverageTarget = 3700;
+    uint256 public collateralTarget = 735 * 1e15; //0.735%
     uint256 public minDAI = 100 * 1e18;
     uint256 public minCompToSell = 5 * 1e17; //0.5 comp
     bool public active = true;
@@ -108,8 +109,9 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
             (position, deficit) = _calculateDesiredPosition(_want, true);
         }else{
             //if strategy is not active we want to deleverage as much as possible in one flash loan
+             (,,position,) = CErc20I(cDAI).getAccountSnapshot(address(this));
             deficit = true;
-            position = netBalanceLent();
+            
         }
         
 
@@ -270,8 +272,12 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     //internal function
     function _deleverage() internal {
         bool deficit = true;
-        uint position = netBalanceLent();
-        doFlashLoan(deficit, position);
+        CErc20I cd =CErc20I(cDAI);
+       
+        //we want to deleverage up to the current borrow balance
+        (,,uint borrowBalance,) = cd.getAccountSnapshot(address(this));
+
+        doFlashLoan(deficit, borrowBalance);
 
     }
 
@@ -324,11 +330,14 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         controller = _controller;
     }
 
-    //multiple time 1000. so 4x target is 4000
+    //collateral factor scaled to 1e18
     function setCollateralTarget(uint256 target) external {
         require(msg.sender == strategist, "!strategist");
-        require(target < 3990, "Target too close to 4x leverage");
-        leverageTarget = target;
+         (, uint collateralFactorMantissa,) = compound.markets(cDAI);
+
+        require(target < collateralFactorMantissa, "Target higher than collateral factor");
+        collateralTarget = target;
+        
     }
 
 
@@ -444,6 +453,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         }
 
         //desired borrow is balance x leveraged targed-1. So if we want 4x leverage (max allowed). we want to borrow 3x desired balance
+        //1e21 is 1e18 x 1000
+        uint leverageTarget = uint256(1e21).div(uint256(1e18).sub(collateralTarget));
         uint desiredBorrow = desiredSupply.mul(leverageTarget.sub(1000)).div(1000);
 
 
@@ -506,8 +517,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         }else{
             uint accrual = borrowAccural.sub(supplyAccrual).div(1e18);
 
-            //we are in liquidation when borrows = 75% of deposits
-            uint amountToGo = (deposits.mul(75).div(100)).sub(borrows);
+            (, uint collateralFactorMantissa,) = compound.markets(cDAI);
+
+            //we are in liquidation when borrows = 75% of deposits 
+            uint amountToGo = (deposits.mul(collateralFactorMantissa).div(1e18)).sub(borrows);
          
             blocks = amountToGo.div(accrual);
 
