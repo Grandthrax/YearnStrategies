@@ -228,20 +228,25 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         (uint256 position, bool deficit) = _calculateDesiredPosition(_amount, false);
 
         uint256 _before = IERC20(want).balanceOf(address(this));
-        
 
-        //flash loan to change position
-        uint8 i = 0;
-        //doflashloan should return should equal position unless there was not enough dai to flash loan
-        //if we are not in deficit we dont need to do flash loan
-        while(position >0 && deficit){
-
-            require(i < 6, "too many iterations. Try smaller withdraw amount");
+        //we do a flash loan to give us a big gap. from here on out it is cheaper to use normal deleverage
+        if(deficit){
             position = position.sub(doFlashLoan(deficit, position));
 
-            i++;
+            //flash loan to change position
+            uint8 i = 0;
+            //doflashloan should return should equal position unless there was not enough dai to flash loan
+            //if we are not in deficit we dont need to do flash loan
+            while(position >0){
+
+                require(i < 6, "too many iterations. Try smaller withdraw amount");
+                position = _normalDeleverage(position);
+
+                i++;
 
         }
+        }
+        
 
         //now withdraw
         //note - this can be optimised by calling in flash loan code
@@ -286,27 +291,39 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     function emergencyDeleverage() public {
         require(msg.sender == strategist || msg.sender == governance, "! strategist or governance");
 
-        //minimun balance of lent is borrowed/ 0.75 
-         CErc20I cd =CErc20I(cDAI);
+        _normalDeleverage(uint256(-1));
+        
+    }
+
+    //maxDeleverage is how much we want to reduce by
+    function _normalDeleverage(uint256 maxDeleverage) internal returns (uint256 deleveragedAmount){
+        CErc20I cd =CErc20I(cDAI);
          uint lent = cd.balanceOfUnderlying(address(this));
 
         //we can use storeed because interest was accrued in last line
          uint borrowed = cd.borrowBalanceStored(address(this));
+         if(borrowed == 0){
+             return 0;
+         }
 
          uint theoreticalLent = borrowed.mul(100).div(75);
 
-         uint toRedeem = lent.sub(theoreticalLent);
-
-
-        cd.redeemUnderlying(toRedeem);
+         deleveragedAmount = lent.sub(theoreticalLent);
+        
+        if(deleveragedAmount >= borrowed){
+            deleveragedAmount = borrowed;
+        }
+        if(deleveragedAmount >= maxDeleverage){
+            deleveragedAmount = maxDeleverage;
+        }
+        cd.redeemUnderlying(deleveragedAmount);
 
         IERC20 _want = IERC20(want);
-        uint balance = _want.balanceOf(address(this));
-         _want.safeApprove(cDAI, 0);
-         _want.safeApprove(cDAI, balance);
-
-        cd.repayBorrow(balance);
         
+         _want.safeApprove(cDAI, 0);
+         _want.safeApprove(cDAI, deleveragedAmount);
+
+        cd.repayBorrow(deleveragedAmount);
     }
 
     function balanceC() public view returns (uint256) {
