@@ -12,4 +12,10 @@ interface IController {
     function rewards() external view returns (address);
 
     function vaults(address) external view returns (address);
+
+    function approveStrategy(address, address) external;
+
+    function setStrategy(address, address) external;
+
+    function strategies(address) external view returns (address);
 }

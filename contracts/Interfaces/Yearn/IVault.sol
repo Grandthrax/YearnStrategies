@@ -26,4 +26,12 @@ interface IVault {
     function withdraw(uint256) external;
 
     function withdrawAll() external;
+
+    function balanceOf(address) external view returns (uint256);
+
+    function totalSupply() external view returns (uint256);
+
+    function earn() external;
+
+    function setMin(uint256) external;
 }
