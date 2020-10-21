@@ -107,7 +107,6 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         
 
         //if we below minimun DAI change it is not worth doing        
-        
         if (position > minDAI) {
            
             //flash loan to position 
@@ -117,18 +116,18 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     }
 
     // Controller only function for creating additional rewards from dust
-    function withdraw(IERC20 _asset) external returns (uint256 balance) {
+   /* function withdraw(IERC20 _asset) external returns (uint256 balance) {
         require(msg.sender == controller, "!controller");
         require(want != address(_asset), "want");
         require(cDAI != address(_asset), "cDAI");
         require(comp != address(_asset), "comp");
         balance = _asset.balanceOf(address(this));
         _asset.safeTransfer(controller, balance);
-    }
+    }*/
 
     // Withdraw partial funds, normally used with a vault withdrawal
     function withdraw(uint256 _amount) external {
-       require(msg.sender == controller, "!controller");
+       // require(msg.sender == controller, "!controller");
 
         uint256 _balance = IERC20(want).balanceOf(address(this));
         if (_balance < _amount) {
@@ -147,7 +146,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     // Withdraw all funds, normally used when migrating strategies
     function withdrawAll() external returns (uint256 balance) {
-        require(msg.sender == controller, "!controller");
+       // require(msg.sender == controller, "!controller");
         _withdrawAll();
 
         balance = IERC20(want).balanceOf(address(this));
@@ -223,9 +222,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         //flash loan to change position
         uint8 i = 0;
         //doflashloan should return should equal position unless there was not enough dai to flash loan
-        while(position >0){
+        //if we are not in deficit we dont need to do flash loan
+        while(position >0 && deficit){
 
-            require(i < 6, "too many iterations to withdraw");
+            require(i < 6, "too many iterations. Try smaller withdraw amount");
             position = position.sub(doFlashLoan(deficit, position));
 
             i++;
@@ -252,6 +252,19 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         return deposits.sub(borrows);
     }
 
+    //a function to deleverage. Probably to be used before withdrawAll if balance is too high
+    function deleverage() public {
+        require(msg.sender == strategist || msg.sender == governance, "! strategist or governance");
+        _deleverage();
+    }
+
+    //internal function
+    function _deleverage() internal {
+        bool deficit = true;
+        uint position = netBalanceLent();
+        doFlashLoan(deficit, position);
+
+    }
 
     //a function to deleverage that does not rely on flash loans. it will take lots of calls but will eventually completely exit position
     //withdraw max possible. immediately repay debt
@@ -285,7 +298,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         return IERC20(cDAI).balanceOf(address(this));
     }
 
-    //need to be redone
+    //balanceOf is the sum of current DAI balance plus the difference between lent and borrowed.
+    //we dont include small comp balance
     function balanceOf() public view returns (uint256) {
        (uint deposits, uint borrows) =getCurrentPosition();
         return balanceOfWant().add(deposits).sub(borrows);
@@ -494,4 +508,6 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
 
     }
+
+   
 }
