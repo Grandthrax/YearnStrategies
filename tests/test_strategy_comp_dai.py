@@ -16,9 +16,10 @@ def test_strategy(accounts, interface, chain, web3, history, YearnCompDaiStrateg
     vault = interface.IVault(controller.vaults(dai))
     strategy = YearnCompDaiStrategy.deploy(controller, {'from': user})
     assert strategy.want() == vault.token() == dai
-    strategy.setCollateralTarget(3900)
-    with brownie.reverts("Target too close to 4x leverage"):
-        strategy.setCollateralTarget(4000)
+    strategy.setWithdrawalFee(0)
+    strategy.setCollateralTarget('0.745 ether')
+    with brownie.reverts("Target higher than collateral factor"):
+        strategy.setCollateralTarget('0.75 ether')
 
     print('migrate strategy')
     controller.approveStrategy(dai, strategy, {'from': ychad})
@@ -31,7 +32,8 @@ def test_strategy(accounts, interface, chain, web3, history, YearnCompDaiStrateg
     vault.earn({'from': user})
     print('balance of strategy:', strategy.balanceOf().to('ether'))
 
-    amount = dai.balanceOf(whale)
+    amount = Wei('1000 ether')
+    user_before = dai.balanceOf(whale)
     dai.approve(vault, amount, {'from': whale})
     print('deposit amount:', amount.to('ether'))
     vault.deposit(amount, {'from': whale})
@@ -48,7 +50,7 @@ def test_strategy(accounts, interface, chain, web3, history, YearnCompDaiStrateg
         print(f'collat: {collat:.5%}')
         print(f'leverage: {leverage:.5f}x')
         print('liquidity:', strategy.getLiquidity().to('ether'))
-        if leverage >= strategy.leverageTarget() / 1001 or i > 10:
+        if collat >= strategy.collateralTarget() / 1.001e18:
             print('target leverage reached')
             break
     
@@ -64,6 +66,22 @@ def test_strategy(accounts, interface, chain, web3, history, YearnCompDaiStrateg
     print(f'implied apr: {(after / before - 1) * (blocks_per_year / sample):.8%}')
 
     vault.withdrawAll({'from': whale})
-    after = dai.balanceOf(whale)
-    print(f'\nuser balance increase:', (after - amount).to('ether'))
-    assert after >= amount
+    user_after = dai.balanceOf(whale)
+    print(f'\nuser balance increase:', (user_after - user_before).to('ether'))
+    assert user_after >= user_before
+
+    for i in count(1):
+        print(f'\ndeleverage {i}')
+        strategy.emergencyDeleverage()
+        print('balance of strategy:', strategy.balanceOf().to('ether'))
+        deposits, borrows = strategy.getCurrentPosition()
+        print('deposits:', Wei(deposits).to('ether'))
+        print('borrows:', Wei(borrows).to('ether'))
+        collat = borrows / deposits
+        leverage = 1 / (1 - collat)
+        print(f'collat: {collat:.5%}')
+        print(f'leverage: {leverage:.5f}x')
+        print('liquidity:', strategy.getLiquidity().to('ether'))
+        if borrows == 0:
+            print('successfully deleveraged')
+            break

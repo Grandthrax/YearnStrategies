@@ -44,11 +44,9 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     uint256 public withdrawalFee = 50;
     uint256 public constant withdrawalMax = 10000;
 
-    //multiple time 1000. so 4x target is 4000
-    //uint256 public leverageTarget = 3700;
-    uint256 public collateralTarget = 735 * 1e15; //0.735%
-    uint256 public minDAI = 100 * 1e18;
-    uint256 public minCompToSell = 5 * 1e17; //0.5 comp
+    uint256 public collateralTarget = 0.735 ether;  // 73.5% 
+    uint256 public minDAI = 100 ether;
+    uint256 public minCompToSell = 0.5 ether;
     bool public active = true;
 
     address public governance;
