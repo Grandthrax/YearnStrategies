@@ -16,10 +16,13 @@ import "./Interfaces/Yearn/IController.sol";
 import "./Interfaces/DyDx/DydxFlashLoanBase.sol";
 import "./Interfaces/DyDx/ICallee.sol";
 
+import "./Interfaces/Aave/FlashLoanReceiverBase.sol";
+import "./Interfaces/Aave/ILendingPoolAddressesProvider.sol";
+import "./Interfaces/Aave/ILendingPool.sol";
 
 //This strategies starting template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICompoundBasic.sol
 //Dydx code with help from money legos
-contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
+contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBase {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
@@ -27,6 +30,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     address public constant want = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
     address public constant DAI = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
     address private constant SOLO = 0x1E0447b19BB6EcFdAe1e4AE1694b0C3659614e4e;
+    address private constant AAVE_LENDING = 0x24a42fD28C976A61Df5D00D0599C34c4f90748c8;
 
     // Comptroller address for compound.finance
     ComptrollerI public constant compound = ComptrollerI(0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B); 
@@ -55,7 +59,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     address public controller;
     address public strategist;
 
-    constructor(address _controller) public {
+    constructor(
+        address _aaveLendingPool,
+        address _controller
+        ) FlashLoanReceiverBase(_aaveLendingPool) public {
         governance = msg.sender;
         strategist = msg.sender;
         controller = _controller;
@@ -342,8 +349,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
 
     ///flash loan stuff
-
-     function doFlashLoan(bool deficit, uint256 amount) internal returns (uint256){
+    function doFlashLoan(bool deficit, uint256 amount) internal returns (uint256){
 
     
         ISoloMargin solo = ISoloMargin(SOLO);
@@ -355,9 +361,13 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         IERC20 token = IERC20(DAI);
 
         // Not enough DAI in DyDx. So we take all we can
+        uint256 _backUpAmount = uint256(0);
         uint amountInSolo = token.balanceOf(SOLO);
+
         if(amountInSolo < amount)
         {
+            // Probably worthy to send as encode data flag pointing out not enough funds and difference = _flashBackUpAmount
+            _backUpAmount = amount.sub(amountInSolo);
             amount = amountInSolo;
         }
 
@@ -420,6 +430,32 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
             cd.borrow(_getRepaymentAmountInternal(amount));
 
         }
+    }
+
+    function flashloanBackUp (
+        uint _flashBackUpAmount
+        ) public {
+            
+        bytes memory data = "";
+
+        ILendingPool lendingPool = ILendingPool(addressesProvider.getLendingPool());
+        lendingPool.flashLoan(address(this), DAI, uint(_flashBackUpAmount), data);
+    }
+
+     function executeOperation(
+        address _reserve,
+        uint256 _amount,
+        uint256 _fee,
+        bytes calldata _params
+    )
+        external
+        override
+    {
+        require(_amount <= getBalanceInternal(address(this), _reserve), "Invalid balance");
+
+        // return the flash loan plus Aave's flash loan fee back to the lending pool
+        uint totalDebt = _amount.add(_fee);
+        transferFundsBackToPoolInternal(_reserve, totalDebt);
     }
 
 
