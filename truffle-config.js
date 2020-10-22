@@ -19,7 +19,6 @@ module.exports = {
     mainnetFork: {
       host: "127.0.0.1",
       port: 8545,
-      gasPrice: 80000000000,
       network_id: "*",
       skipDryRun: true,
       networkCheckTimeout: 1000000000,
@@ -28,6 +27,10 @@ module.exports = {
   compilers: {
     solc: {
       version: "0.6.9",
+      optimizer: { 
+        enabled: true, 
+        runs: 200 
+      }
     },
   },
 };

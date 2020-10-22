@@ -16,10 +16,13 @@ import "./Interfaces/Yearn/IController.sol";
 import "./Interfaces/DyDx/DydxFlashLoanBase.sol";
 import "./Interfaces/DyDx/ICallee.sol";
 
+import "./Interfaces/Aave/FlashLoanReceiverBase.sol";
+import "./Interfaces/Aave/ILendingPoolAddressesProvider.sol";
+import "./Interfaces/Aave/ILendingPool.sol";
 
 //This strategies starting template is taken from https://github.com/iearn-finance/yearn-starter-pack/tree/master/contracts/strategies/StrategyDAICompoundBasic.sol
 //Dydx code with help from money legos
-contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
+contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBase {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
@@ -27,6 +30,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     address public constant want = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
     address public constant DAI = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
     address private constant SOLO = 0x1E0447b19BB6EcFdAe1e4AE1694b0C3659614e4e;
+    address private constant AAVE_LENDING = 0x24a42fD28C976A61Df5D00D0599C34c4f90748c8;
 
     // Comptroller address for compound.finance
     ComptrollerI public constant compound = ComptrollerI(0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B); 
@@ -48,6 +52,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     uint256 public minDAI = 100 ether;
     uint256 public minCompToSell = 0.5 ether;
     bool public active = true;
+    bool public needBackUp = false;
 
     bool public DyDxActive = true;
     bool public AaveActive = true;
@@ -56,7 +61,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     address public controller;
     address public strategist;
 
-    constructor(address _controller) public {
+    constructor(
+        address _aaveLendingPool,
+        address _controller
+        ) FlashLoanReceiverBase(_aaveLendingPool) public {
         governance = msg.sender;
         strategist = msg.sender;
         controller = _controller;
@@ -105,23 +113,22 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         uint256 position; 
         bool deficit;
         uint256 _want;
-        if(active){
+        
+        if(active) {
             _want = IERC20(want).balanceOf(address(this));
             (position, deficit) = _calculateDesiredPosition(_want, true);
-        }else{
+        } else {
             //if strategy is not active we want to deleverage as much as possible in one flash loan
              (,,position,) = CErc20I(cDAI).getAccountSnapshot(address(this));
             deficit = true;
             
         }
         
-
         //if we below minimun DAI change it is not worth doing        
         if (position > minDAI) {
            
             //flash loan to position 
             doFlashLoan(deficit, position);
-
         }
     }
 
@@ -233,6 +240,11 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         //we do a flash loan to give us a big gap. from here on out it is cheaper to use normal deleverage
         if(deficit){
             position = position.sub(doFlashLoan(deficit, position));
+            
+            // Will decrease number of interactions using aave as backup
+            if(needBackUp) {
+               position = position.sub(flashloanBackUp(deficit, position));
+            }
 
             //flash loan to change position
             uint8 i = 0;
@@ -251,7 +263,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
         //now withdraw
         //note - this can be optimised by calling in flash loan code
-        CErc20I cd =CErc20I(cDAI);
+        CErc20I cd = CErc20I(cDAI);
         cd.redeemUnderlying(_amount);
 
         uint256 _after = IERC20(want).balanceOf(address(this));
@@ -358,22 +370,48 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
         
     }
 
+    function _loanLogic(bool deficit, uint256 amount) internal {
+        IERC20 _want = IERC20(want);
+        CErc20I cd = CErc20I(cDAI);
+
+        
+        //if in deficit we repay amount and then withdraw
+        if(deficit) {
+           
+            _want.safeApprove(cDAI, 0);
+            _want.safeApprove(cDAI, amount);
+
+            cd.repayBorrow(amount);
+
+
+            //if we are withdrawing we take more
+            cd.redeemUnderlying(_getRepaymentAmountInternal(amount));
+        } else {
+            uint amIn = _want.balanceOf(address(this));
+            _want.safeApprove(cDAI, 0);
+            _want.safeApprove(cDAI, amIn);
+
+            cd.mint(amIn);
+
+            cd.borrow(_getRepaymentAmountInternal(amount));
+
+        }
+    }
 
     ///flash loan stuff
+    function doFlashLoan(bool deficit, uint256 amount) internal returns (uint256) {
 
-     function doFlashLoan(bool deficit, uint256 amount) internal returns (uint256){
-
-    
         ISoloMargin solo = ISoloMargin(SOLO);
 
         uint256 marketId = _getMarketIdFromTokenAddress(SOLO, DAI);
         
-       
-      
         IERC20 token = IERC20(DAI);
+        
+        needBackUp = false;
 
         // Not enough DAI in DyDx. So we take all we can
         uint amountInSolo = token.balanceOf(SOLO);
+  
         if(amountInSolo < amount)
         {
             amount = amountInSolo;
@@ -413,31 +451,59 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     ) public override {
         
         (bool deficit, uint256 amount) = abi.decode(data,(bool, uint256));
-        IERC20 _want = IERC20(want);
-        CErc20I cd =CErc20I(cDAI);
 
+        _loanLogic(deficit, amount);
+    }
+
+    function _maxLiqAaveAvailable(uint256 _flashBackUpAmount) view internal returns(uint256) {
+
+        //(, uint256 availableLiquidity, , , , , , , , , , ,) = lendingPool.getReserveData(DAI);
         
-        //if in deficit we repay amount and then withdraw
-        if(deficit){
-           
-            _want.safeApprove(cDAI, 0);
-            _want.safeApprove(cDAI, amount);
+        uint256 availableLiquidity = IERC20(DAI).balanceOf(addressesProvider.getLendingPoolCore());
 
-            cd.repayBorrow(amount);
-
-
-            //if we are withdrawing we take more
-            cd.redeemUnderlying(_getRepaymentAmountInternal(amount));
-        }else{
-            uint amIn = _want.balanceOf(address(this));
-            _want.safeApprove(cDAI, 0);
-            _want.safeApprove(cDAI, amIn);
-
-            cd.mint(amIn);
-
-            cd.borrow(_getRepaymentAmountInternal(amount));
-
+        if(availableLiquidity < _flashBackUpAmount) {
+            _flashBackUpAmount = availableLiquidity;
         }
+
+        return _flashBackUpAmount;
+    }
+
+    function flashloanBackUp (
+        bool deficit,
+        uint256 _flashBackUpAmount
+    )   public returns (uint256)
+    {
+        bytes memory data = abi.encode(deficit, _flashBackUpAmount);
+
+        ILendingPool lendingPool = ILendingPool(addressesProvider.getLendingPool());
+       
+        lendingPool.flashLoan(
+                        address(this), 
+                        DAI, 
+                        uint(_maxLiqAaveAvailable(_flashBackUpAmount)), 
+                        data);
+
+        return _flashBackUpAmount;
+    }
+
+     function executeOperation(
+        address _reserve,
+        uint256 _amount,
+        uint256 _fee,
+        bytes calldata _params
+    )
+        external
+        override
+    {
+        require(_amount <= getBalanceInternal(address(this), _reserve), "Invalid balance");
+
+        (bool deficit, uint256 amount) = abi.decode(_params,(bool, uint256));
+
+        _loanLogic(deficit, amount);
+
+        // return the flash loan plus Aave's flash loan fee back to the lending pool
+        uint totalDebt = _amount.add(_fee);
+        transferFundsBackToPoolInternal(_reserve, totalDebt);
     }
 
 

@@ -4,13 +4,16 @@
   "description": "",
   "main": "truffle-config.js",
   "dependencies": {
+    "@kollateral/contracts": "^0.1.1",
     "@openzeppelin/contracts": "^3.2.0",
+    "@openzeppelin/test-environment": "^0.1.5",
+    "@openzeppelin/test-helpers": "^0.5.7",
     "@truffle/hdwallet-provider": "^1.1.1",
     "dotenv": "^8.2.0"
   },
   "devDependencies": {},
   "scripts": {
-    "fork-infura": "ganache-cli -f wss://mainnet.infura.io/ws/v3/{YOUR_ID} -u 0x7a8edc710ddeadddb0b539de83f3a306a621e823",
+    "fork-infura": "ganache-cli -f wss://mainnet.infura.io/ws/v3/{YOUR_ID} -u 0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8 -b 1 -d 100000000 --allowUnlimitedContractSize",
     "deployMainnetFork": "truffle migrate --reset --network mainnetFork",
     "deployLocal": "truffle migrate --reset --network development"
   },
