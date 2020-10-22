@@ -53,7 +53,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
     uint256 public collateralTarget = 735 * 1e15; //0.735%
     uint256 public minDAI = 100 * 1e18;
     uint256 public minCompToSell = 5 * 1e17; //0.5 comp
+    uint256 public backUpAmount = uint256(0);
+    
     bool public active = true;
+    bool public needBackUp = false;
 
     address public governance;
     address public controller;
@@ -111,23 +114,27 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         uint256 position; 
         bool deficit;
         uint256 _want;
-        if(active){
+        
+        if(active) {
             _want = IERC20(want).balanceOf(address(this));
             (position, deficit) = _calculateDesiredPosition(_want, true);
-        }else{
+        } else {
             //if strategy is not active we want to deleverage as much as possible in one flash loan
              (,,position,) = CErc20I(cDAI).getAccountSnapshot(address(this));
             deficit = true;
             
         }
         
-
         //if we below minimun DAI change it is not worth doing        
         if (position > minDAI) {
            
             //flash loan to position 
             doFlashLoan(deficit, position);
-
+            
+            // flash loan to remaining position
+            if(needBackUp) {
+                flashloanBackUp(deficit, backUpAmount);
+            }
         }
     }
 
@@ -241,18 +248,22 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         uint8 i = 0;
         //doflashloan should return should equal position unless there was not enough dai to flash loan
         //if we are not in deficit we dont need to do flash loan
-        while(position >0 && deficit){
+        while(position > 0 && deficit){
 
             require(i < 6, "too many iterations. Try smaller withdraw amount");
             position = position.sub(doFlashLoan(deficit, position));
+            
+            // Will decrease number of interactions using aave as backup
+            if(needBackUp) {
+               position = position.sub(flashloanBackUp(deficit, backUpAmount));
+            }
 
             i++;
-
         }
 
         //now withdraw
         //note - this can be optimised by calling in flash loan code
-        CErc20I cd =CErc20I(cDAI);
+        CErc20I cd = CErc20I(cDAI);
         cd.redeemUnderlying(_amount);
 
         uint256 _after = IERC20(want).balanceOf(address(this));
@@ -347,27 +358,53 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         
     }
 
+    function _loanLogic(bool deficit, uint256 amount) internal {
+        IERC20 _want = IERC20(want);
+        CErc20I cd = CErc20I(cDAI);
+
+        
+        //if in deficit we repay amount and then withdraw
+        if(deficit) {
+           
+            _want.safeApprove(cDAI, 0);
+            _want.safeApprove(cDAI, amount);
+
+            cd.repayBorrow(amount);
+
+
+            //if we are withdrawing we take more
+            cd.redeemUnderlying(_getRepaymentAmountInternal(amount));
+        } else {
+            uint amIn = _want.balanceOf(address(this));
+            _want.safeApprove(cDAI, 0);
+            _want.safeApprove(cDAI, amIn);
+
+            cd.mint(amIn);
+
+            cd.borrow(_getRepaymentAmountInternal(amount));
+
+        }
+    }
 
     ///flash loan stuff
-    function doFlashLoan(bool deficit, uint256 amount) internal returns (uint256){
+    function doFlashLoan(bool deficit, uint256 amount) internal returns (uint256) {
 
-    
         ISoloMargin solo = ISoloMargin(SOLO);
 
         uint256 marketId = _getMarketIdFromTokenAddress(SOLO, DAI);
         
-       
-      
         IERC20 token = IERC20(DAI);
+        
+        needBackUp = false;
 
         // Not enough DAI in DyDx. So we take all we can
-        uint256 _backUpAmount = uint256(0);
         uint amountInSolo = token.balanceOf(SOLO);
-
+  
         if(amountInSolo < amount)
         {
-            // Probably worthy to send as encode data flag pointing out not enough funds and difference = _flashBackUpAmount
-            _backUpAmount = amount.sub(amountInSolo);
+            // Hold difference for subsequent aave flash loan call
+            backUpAmount = amount.sub(amountInSolo);
+            needBackUp = true;
             amount = amountInSolo;
         }
 
@@ -405,41 +442,21 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
     ) public override {
         
         (bool deficit, uint256 amount) = abi.decode(data,(bool, uint256));
-        IERC20 _want = IERC20(want);
-        CErc20I cd =CErc20I(cDAI);
 
-        
-        //if in deficit we repay amount and then withdraw
-        if(deficit){
-           
-            _want.safeApprove(cDAI, 0);
-            _want.safeApprove(cDAI, amount);
-
-            cd.repayBorrow(amount);
-
-
-            //if we are withdrawing we take more
-            cd.redeemUnderlying(_getRepaymentAmountInternal(amount));
-        }else{
-            uint amIn = _want.balanceOf(address(this));
-            _want.safeApprove(cDAI, 0);
-            _want.safeApprove(cDAI, amIn);
-
-            cd.mint(amIn);
-
-            cd.borrow(_getRepaymentAmountInternal(amount));
-
-        }
+        _loanLogic(deficit, amount);
     }
 
     function flashloanBackUp (
-        uint _flashBackUpAmount
-        ) public {
-            
-        bytes memory data = "";
+        bool deficit,
+        uint256 _flashBackUpAmount
+    )   public returns (uint256)
+    {
+        bytes memory data = abi.encode(deficit, _flashBackUpAmount);
 
         ILendingPool lendingPool = ILendingPool(addressesProvider.getLendingPool());
         lendingPool.flashLoan(address(this), DAI, uint(_flashBackUpAmount), data);
+
+        return _flashBackUpAmount;
     }
 
      function executeOperation(
@@ -452,6 +469,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         override
     {
         require(_amount <= getBalanceInternal(address(this), _reserve), "Invalid balance");
+
+        (bool deficit, uint256 amount) = abi.decode(_params,(bool, uint256));
+
+        _loanLogic(deficit, amount);
 
         // return the flash loan plus Aave's flash loan fee back to the lending pool
         uint totalDebt = _amount.add(_fee);

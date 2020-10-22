@@ -27,7 +27,7 @@ const Icompt = new web3.eth.Contract(
   addresses.comptroller.Icomptroller
 );
 
-const AMOUNT_DEPOSIT_WEI = web3.utils.toWei((2000000).toString()); // $2M
+const AMOUNT_DEPOSIT_WEI = web3.utils.toWei((500000).toString()); // 500K
 const AMOUNT_WITHDRAW_WEI = web3.utils.toWei((1999.999).toString()); // $1999
 
 const test = async () => {
@@ -39,7 +39,7 @@ const test = async () => {
       YearnCompDaiStrategy.networks[networkId].address
     );
 
-    // -- Send 2000 DAI to the contract for testing deposit() method --
+    // -- Send 500k DAI to the contract for testing deposit() method --
     await DAI.methods
       .transfer(StrategyContract.options.address, AMOUNT_DEPOSIT_WEI)
       .send({ from: unlockAddress });
@@ -53,7 +53,7 @@ const test = async () => {
 
     let data = tx.encodeABI();
 
-    const txData = {
+   const txData = {
       from: unlockAddress,
       to: StrategyContract.options.address,
       data,
@@ -84,7 +84,7 @@ const test = async () => {
     console.log(AFTER_DEPOSIT);
 
     // -- Test withdraw(uint256) method --
-    tx = await StrategyContract.methods.withdraw(AMOUNT_WITHDRAW_WEI);
+    /*tx = await StrategyContract.methods.withdraw(AMOUNT_WITHDRAW_WEI);
 
     data = tx.encodeABI();
 
@@ -113,10 +113,10 @@ const test = async () => {
       current_pos: await StrategyContract.methods.getCurrentPosition().call(),
     };
 
-    console.log(AFTER_WITHDRAW);
+    console.log(AFTER_WITHDRAW);*/
 
     // -- Test _harvest() through the internal function of deposit() --
-    tx = await StrategyContract.methods.deposit();
+    /*tx = await StrategyContract.methods.withdrawAll();
 
     data = tx.encodeABI();
 
@@ -145,7 +145,7 @@ const test = async () => {
       current_pos: await StrategyContract.methods.getCurrentPosition().call(),
     };
 
-    console.log(AFTER_DEPOSIT_AND_CLAIM);
+    console.log(AFTER_DEPOSIT_AND_CLAIM);*/
   } catch (error) {
     console.log(error);
   }
