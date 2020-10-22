@@ -44,7 +44,7 @@ def test_huge_deposit_and_withdrawal(accounts, interface, chain, web3, history, 
     print(f'leverage: {leverage:.5f}x')
     print('liquidity:', strategy.getLiquidity().to('ether'))
 
-    print(dai.balanceOf('0x3dfd23A6c5E8BbcFc9581d2E864a68feb6a076d3').to('ether'))
+    
 
     print('\n----whale deposits----')
     

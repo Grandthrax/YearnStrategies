@@ -29,8 +29,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
     /**
     * Events Section
-    */
-    
+    */   
     /**
      * @notice Event emitted when trying to do Flash Loan
      */
@@ -333,7 +332,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
              return 0;
          }
 
-         uint theoreticalLent = borrowed.mul(100).div(75);
+         (, uint collateralFactorMantissa,) = compound.markets(cDAI);
+         uint theoreticalLent = borrowed.mul(1e18).div(collateralFactorMantissa);
 
          deleveragedAmount = lent.sub(theoreticalLent);
         
