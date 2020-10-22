@@ -25,46 +25,55 @@ const Icompt = new web3.eth.Contract(
   addresses.comptroller.Icomptroller
 );
 
-const AMOUNT_DEPOSIT_WEI = web3.utils.toWei((500000).toString()); // 500K
+const AMOUNT_DEPOSIT_WEI = web3.utils.toWei((2000000).toString()); // 2M
 
 const test = async () => {
   try {
     const networkId = await web3.eth.net.getId();
+    const blockNumber = await web3.eth.getBlockNumber();
 
     const StrategyContract = new web3.eth.Contract(
       YearnCompDaiStrategy.abi,
       YearnCompDaiStrategy.networks[networkId].address
     );
 
-    /*const AMOUNT_BAL_WHALE = await DAI.methods
-    .balanceOf(unlockAddress)
-    .call();*/
+    const AMOUNT_BAL_WHALE = await DAI.methods.balanceOf(unlockAddress).call();
+
+    /* For testing purpose to check properly the max liq in aave at current block
+    let max_liq = await StrategyContract.methods
+      ._maxLiqAaveAvailable(AMOUNT_BAL_WHALE)
+      .call();
+    console.log("Max liq available in aave in block number: " + blockNumber);
+    console.log(web3.utils.fromWei(max_liq.toString()));*/
 
     // -- Send Whale DAI balance to the contract for testing deposit() method --
-    await DAI.methods
-      .transfer(StrategyContract.options.address, AMOUNT_DEPOSIT_WEI)
-      .send({ from: unlockAddress });
 
-    let tx = await StrategyContract.methods.deposit();
+    for (let i = 0; i < 8; i++) {
+      await DAI.methods
+        .transfer(StrategyContract.options.address, AMOUNT_DEPOSIT_WEI)
+        .send({ from: unlockAddress });
 
-    const [gasPrice, gasCost] = await Promise.all([
-      web3.eth.getGasPrice(),
-      tx.estimateGas({ from: unlockAddress }),
-    ]);
+      let tx = await StrategyContract.methods.deposit();
 
-    let data = tx.encodeABI();
+      const [gasPrice, gasCost] = await Promise.all([
+        web3.eth.getGasPrice(),
+        tx.estimateGas({ from: unlockAddress }),
+      ]);
 
-   const txData = {
-      from: unlockAddress,
-      to: StrategyContract.options.address,
-      data,
-      gas: gasCost,
-      gasPrice,
-    };
+      let data = tx.encodeABI();
 
-    const receipt = await web3.eth.sendTransaction(txData);
+      const txData = {
+        from: unlockAddress,
+        to: StrategyContract.options.address,
+        data,
+        gas: gasCost,
+        gasPrice,
+      };
 
-    console.log(`Transaction hash: ${receipt.transactionHash}`);
+      const receipt = await web3.eth.sendTransaction(txData);
+
+      console.log(`Transaction hash: ${receipt.transactionHash}`);
+    }
 
     const AFTER_DEPOSIT = {
       account_borrowable: await Icompt.methods
@@ -82,42 +91,20 @@ const test = async () => {
       current_pos: await StrategyContract.methods.getCurrentPosition().call(),
     };
 
-    console.log(AFTER_DEPOSIT);
+    console.log("--- Current position after depositing 2M x 8 ---");
+    console.log(
+      "Deposited: " +
+        web3.utils.fromWei(AFTER_DEPOSIT.current_pos.deposits.toString())
+    );
+    console.log(
+      "Borrowed: " +
+        web3.utils.fromWei(AFTER_DEPOSIT.current_pos.borrows.toString())
+    );
 
-    // -- Test withdraw(uint256) method --
-    /*tx = await StrategyContract.methods.withdraw(AMOUNT_WITHDRAW_WEI);
+    // -- Test withdrawAll() --
+    console.log("--- NEXT STEP ---> withdrawaAll() ---");
 
-    data = tx.encodeABI();
-
-    const txData_withdraw = {
-      from: unlockAddress,
-      to: StrategyContract.options.address,
-      data,
-      gas: 4100000,
-      gasPrice,
-    };
-
-    const receipt_withdraw = await web3.eth.sendTransaction(txData_withdraw);
-
-    console.log(`Transaction hash: ${receipt_withdraw.transactionHash}`);
-
-    const AFTER_WITHDRAW = {
-      account_borrowable: await Icompt.methods
-        .getAccountLiquidity(StrategyContract.options.address)
-        .call(),
-      dai_contract_bal: await DAI.methods
-        .balanceOf(StrategyContract.options.address)
-        .call(),
-      cdai_contract_bal: await cDAI.methods
-        .balanceOf(StrategyContract.options.address)
-        .call(),
-      current_pos: await StrategyContract.methods.getCurrentPosition().call(),
-    };
-
-    console.log(AFTER_WITHDRAW);*/
-
-    // -- Test _harvest() through the internal function of deposit() --
-    /*tx = await StrategyContract.methods.withdrawAll();
+    tx = await StrategyContract.methods.withdrawAll();
 
     data = tx.encodeABI();
 
@@ -146,7 +133,38 @@ const test = async () => {
       current_pos: await StrategyContract.methods.getCurrentPosition().call(),
     };
 
-    console.log(AFTER_DEPOSIT_AND_CLAIM);*/
+    console.log("--- Current position after withdraAll() ---");
+    console.log(
+      "Deposited: " +
+        web3.utils.fromWei(
+          AFTER_DEPOSIT_AND_CLAIM.current_pos.deposits.toString()
+        )
+    );
+    console.log(
+      "Borrowed: " +
+        web3.utils.fromWei(
+          AFTER_DEPOSIT_AND_CLAIM.current_pos.borrows.toString()
+        )
+    );
+    console.log("--- Event output : Leverage");
+    const events = await StrategyContract.getPastEvents("Leverage");
+
+    events.forEach((evt, idx) => {
+      const returnVal = evt.returnValues;
+
+      console.log("----------------");
+      console.log("Event nº: " + idx);
+      console.log(
+        `amountRequested: ${web3.utils.fromWei(
+          returnVal.amountRequested.toString()
+        )}`
+      );
+      console.log(
+        `amountGiven: ${web3.utils.fromWei(returnVal.amountGiven.toString())}`
+      );
+      console.log(`deficit: ${returnVal.deficit}`);
+      console.log(`flashLoan: ${returnVal.flashLoan}`);
+    });
   } catch (error) {
     console.log(error);
   }

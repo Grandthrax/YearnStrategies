@@ -21,6 +21,7 @@ module.exports = {
       port: 8545,
       network_id: "*",
       skipDryRun: true,
+      gas: 10000000,
       networkCheckTimeout: 1000000000,
     },
   },
