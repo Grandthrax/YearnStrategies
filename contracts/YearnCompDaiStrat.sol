@@ -61,9 +61,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
     address public strategist;
 
     constructor(
-        address _aaveLendingPool,
         address _controller
-        ) FlashLoanReceiverBase(_aaveLendingPool) public {
+        ) FlashLoanReceiverBase(AAVE_LENDING) public {
         governance = msg.sender;
         strategist = msg.sender;
         controller = _controller;
