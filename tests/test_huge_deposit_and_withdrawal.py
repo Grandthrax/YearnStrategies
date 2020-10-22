@@ -13,8 +13,11 @@ def test_huge_deposit_and_withdrawal(accounts, interface, chain, web3, history, 
     dai = interface.ERC20('0x6b175474e89094c44da98b954eedeac495271d0f')
     cdai = interface.CErc20I('0x5d3a536e4d6dbd6114cc1ead35777bab948e3643')
     comp = interface.ERC20('0xc00e94cb662c3520282e6f5717214004a7f26888')
+
     controller = interface.IController('0x9E65Ad11b299CA0Abefc2799dDB6314Ef2d91080')
     vault = interface.IVault(controller.vaults(dai))
+
+    print(dai.balanceOf('0x3dfd23A6c5E8BbcFc9581d2E864a68feb6a076d3'))
 
     strategy = YearnCompDaiStrategy.deploy(controller, {'from': user})
     assert strategy.want() == vault.token() == dai
@@ -41,10 +44,12 @@ def test_huge_deposit_and_withdrawal(accounts, interface, chain, web3, history, 
     print(f'leverage: {leverage:.5f}x')
     print('liquidity:', strategy.getLiquidity().to('ether'))
 
+    print(dai.balanceOf('0x3dfd23A6c5E8BbcFc9581d2E864a68feb6a076d3').to('ether'))
+
     print('\n----whale deposits----')
     
     #amount =dai.balanceOf(whale)
-    amount = Wei('11000000 ether')
+    amount = Wei('10000000 ether')
     dai.approve(vault, amount, {'from': whale})
     print('deposit amount:', amount.to('ether'))
     vault.deposit(amount, {'from': whale})
@@ -84,10 +89,11 @@ def test_huge_deposit_and_withdrawal(accounts, interface, chain, web3, history, 
 
 
     print('\n----whale withdraws large amount----')
+   
     user_before = dai.balanceOf(whale)
     tx = vault.withdrawAll({'from': whale})
     print(tx.events['Leverage'])
-    print(tx.info())
+    #print(tx.info())
     user_after = dai.balanceOf(whale)
     print(f'\nWhale withdrew:', (user_after - user_before).to('ether'))
     deposits, borrows = strategy.getCurrentPosition()

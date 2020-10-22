@@ -509,7 +509,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
         //(, uint256 availableLiquidity, , , , , , , , , , ,) = lendingPool.getReserveData(DAI);
         
-        uint256 availableLiquidity = IERC20(DAI).balanceOf(addressesProvider.getLendingPoolCore());
+        //uint256 availableLiquidity = IERC20(DAI).balanceOf(addressesProvider.getLendingPoolCore());
+       uint256 availableLiquidity = IERC20(DAI).balanceOf(address(0x3dfd23A6c5E8BbcFc9581d2E864a68feb6a076d3));
 
         if(availableLiquidity < _flashBackUpAmount) {
             _flashBackUpAmount = availableLiquidity;
@@ -530,7 +531,14 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
         ILendingPool lendingPool = ILendingPool(addressesProvider.getLendingPool());
 
-        amount = _maxLiqAaveAvailable(_flashBackUpAmount);
+        uint256 availableLiquidity = IERC20(DAI).balanceOf(address(0x3dfd23A6c5E8BbcFc9581d2E864a68feb6a076d3));
+
+        if(availableLiquidity < _flashBackUpAmount) {
+            amount = availableLiquidity;
+        }else{
+            amount = _flashBackUpAmount;
+        }
+        
         require(amount <= _flashBackUpAmount, "incorrect amount");
 
         bytes memory data = abi.encode(deficit, amount);
