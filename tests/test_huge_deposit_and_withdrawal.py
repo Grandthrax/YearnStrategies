@@ -41,9 +41,10 @@ def test_huge_deposit_and_withdrawal(accounts, interface, chain, web3, history, 
     print(f'leverage: {leverage:.5f}x')
     print('liquidity:', strategy.getLiquidity().to('ether'))
 
-    print('\n----whale deposits 29m----')
-    user_before = dai.balanceOf(whale)
-    amount =dai.balanceOf(whale)
+    print('\n----whale deposits----')
+    
+    #amount =dai.balanceOf(whale)
+    amount = Wei('1500000 ether')
     dai.approve(vault, amount, {'from': whale})
     print('deposit amount:', amount.to('ether'))
     vault.deposit(amount, {'from': whale})
@@ -61,6 +62,9 @@ def test_huge_deposit_and_withdrawal(accounts, interface, chain, web3, history, 
     print(f'collat: {collat:.5%}')
     print(f'leverage: {leverage:.5f}x')
     print('liquidity:', strategy.getLiquidity().to('ether'))
+
+    #print('\n----disabling Aave----')
+    #strategy.disableAave({'from': user})
 
     for i in count(1):
         print(f'\ndeposit {i}')
@@ -80,9 +84,13 @@ def test_huge_deposit_and_withdrawal(accounts, interface, chain, web3, history, 
 
 
     print('\n----whale withdraws large amount----')
-    vault.withdrawAll({'from': whale})
+    user_before = dai.balanceOf(whale)
+    tx = vault.withdrawAll({'from': whale})
+    #print(tx.events.keys())
+    #print(tx.events.items())
+    #print(tx.events.values())
     user_after = dai.balanceOf(whale)
-    print(f'\nWhale balance change:', (user_after - user_before).to('ether'))
+    print(f'\nWhale withdrew:', (user_after - user_before).to('ether'))
     deposits, borrows = strategy.getCurrentPosition()
     print('deposits:', Wei(deposits).to('ether'))
     print('borrows:', Wei(borrows).to('ether'))  

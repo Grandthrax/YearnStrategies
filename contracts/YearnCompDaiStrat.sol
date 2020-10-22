@@ -124,6 +124,11 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         
         //if we below minimun DAI change it is not worth doing        
         if (position > minDAI && DyDxActive) {
+
+            //if there is huge position to improve we want to do normal leverage
+            if(position > IERC20(DAI).balanceOf(SOLO) && !deficit){
+                position = position -_normalLeverage(position);
+            }
            
             //flash loan to position 
             doDyDxFlashLoan(deficit, position);
@@ -298,6 +303,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
     }
 
+
     //a function to deleverage that does not rely on flash loans. it will take lots of calls but will eventually completely exit position
     //withdraw max possible. immediately repay debt
     function emergencyDeleverage() public {
@@ -338,6 +344,39 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         cd.repayBorrow(deleveragedAmount);
     }
 
+
+    //maxDeleverage is how much we want to reduce by
+    function _normalLeverage(uint256 maxLeverage) internal returns (uint256 deleveragedAmount){
+        require(active, "Leverage Disabled");
+        CErc20I cd =CErc20I(cDAI);
+         uint lent = cd.balanceOfUnderlying(address(this));
+
+        //we can use storeed because interest was accrued in last line
+         uint borrowed = cd.borrowBalanceStored(address(this));
+         if(borrowed == 0){
+             return 0;
+         }
+
+        (, uint collateralFactorMantissa,) = compound.markets(cDAI);
+        uint theoreticalBorrow = lent.mul(collateralFactorMantissa).div(1e18);
+
+        uint leveragedAmount = theoreticalBorrow.sub(borrowed);
+
+        if(leveragedAmount >= maxLeverage){
+            leveragedAmount = maxLeverage;
+        }
+
+        cd.borrow(leveragedAmount);
+
+        IERC20 _want = IERC20(want);
+        
+        
+        _want.safeApprove(cDAI, 0);
+        _want.safeApprove(cDAI, leveragedAmount);
+
+        cd.mint(leveragedAmount);
+    }
+
     function balanceC() public view returns (uint256) {
         return IERC20(cDAI).balanceOf(address(this));
     }
@@ -369,7 +408,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         
     }
 
-    function _loanLogic(bool deficit, uint256 amount) internal {
+    function _loanLogic(bool deficit, uint256 amount, uint256 repayAmount) internal {
         IERC20 _want = IERC20(want);
         CErc20I cd = CErc20I(cDAI);
 
@@ -382,17 +421,16 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
             cd.repayBorrow(amount);
 
-
             //if we are withdrawing we take more
-            cd.redeemUnderlying(_getRepaymentAmountInternal(amount));
+            cd.redeemUnderlying(repayAmount);
         } else {
             uint amIn = _want.balanceOf(address(this));
             _want.safeApprove(cDAI, 0);
             _want.safeApprove(cDAI, amIn);
 
             cd.mint(amIn);
-
-            cd.borrow(_getRepaymentAmountInternal(amount));
+           
+            cd.borrow(repayAmount);
 
         }
     }
@@ -418,7 +456,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
         token.safeApprove(SOLO, repayAmount);
 
-        bytes memory data = abi.encode(deficit, amount);
+        bytes memory data = abi.encode(deficit, amount, repayAmount);
 
 
         // 1. Withdraw $
@@ -447,9 +485,9 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         bytes memory data
     ) public override {
         
-        (bool deficit, uint256 amount) = abi.decode(data,(bool, uint256));
+        (bool deficit, uint256 amount, uint repayAmount) = abi.decode(data,(bool, uint256, uint256));
 
-        _loanLogic(deficit, amount);
+        _loanLogic(deficit, amount, repayAmount);
     }
 
     function _maxLiqAaveAvailable(uint256 _flashBackUpAmount) view internal returns(uint256) {
@@ -468,19 +506,26 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
     function doAaveFlashLoan (
         bool deficit,
         uint256 _flashBackUpAmount
-    )   public returns (uint256)
+    )   public returns (uint256 amount)
     {
-        bytes memory data = abi.encode(deficit, _flashBackUpAmount);
+        //we do not want to do aave flash loans for leveraging up. Fee could put us into liquidation
+        if(!deficit){
+            return _flashBackUpAmount;
+        }
 
         ILendingPool lendingPool = ILendingPool(addressesProvider.getLendingPool());
+
+        amount = _maxLiqAaveAvailable(_flashBackUpAmount);
+        require(amount <= _flashBackUpAmount, "incorrect amount");
+
+        bytes memory data = abi.encode(deficit, amount);
        
         lendingPool.flashLoan(
                         address(this), 
                         DAI, 
-                        uint(_maxLiqAaveAvailable(_flashBackUpAmount)), 
+                        amount, 
                         data);
 
-        return _flashBackUpAmount;
     }
 
      function executeOperation(
@@ -492,11 +537,11 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         external
         override
     {
-        require(_amount <= getBalanceInternal(address(this), _reserve), "Invalid balance");
+        //require(_amount <= getBalanceInternal(address(this), _reserve), "Invalid balance");
 
         (bool deficit, uint256 amount) = abi.decode(_params,(bool, uint256));
 
-        _loanLogic(deficit, amount);
+        _loanLogic(deficit, amount, amount.add(_fee));
 
         // return the flash loan plus Aave's flash loan fee back to the lending pool
         uint totalDebt = _amount.add(_fee);
