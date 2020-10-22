@@ -52,7 +52,6 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
     uint256 public minDAI = 100 ether;
     uint256 public minCompToSell = 0.5 ether;
     bool public active = true;
-    bool public needBackUp = false;
 
     bool public DyDxActive = true;
     bool public AaveActive = true;
@@ -125,10 +124,10 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         }
         
         //if we below minimun DAI change it is not worth doing        
-        if (position > minDAI) {
+        if (position > minDAI && DyDxActive) {
            
             //flash loan to position 
-            doFlashLoan(deficit, position);
+            doDyDxFlashLoan(deficit, position);
         }
     }
 
@@ -237,16 +236,17 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
         uint256 _before = IERC20(want).balanceOf(address(this));
 
-        //we do a flash loan to give us a big gap. from here on out it is cheaper to use normal deleverage
+        //we do a flash loan to give us a big gap. from here on out it is cheaper to use normal deleverage. Use Aave for extremely large loans
         if(deficit){
-            position = position.sub(doFlashLoan(deficit, position));
+            if(DyDxActive){
+                position = position.sub(doDyDxFlashLoan(deficit, position));
+            }
             
             // Will decrease number of interactions using aave as backup
-            if(needBackUp) {
-               position = position.sub(flashloanBackUp(deficit, position));
+            if(position >0 && AaveActive) {
+               position = position.sub(doAaveFlashLoan(deficit, position));
             }
 
-            //flash loan to change position
             uint8 i = 0;
             //doflashloan should return should equal position unless there was not enough dai to flash loan
             //if we are not in deficit we dont need to do flash loan
@@ -295,7 +295,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         //we want to deleverage up to the current borrow balance
         (,,uint borrowBalance,) = cd.getAccountSnapshot(address(this));
 
-        doFlashLoan(deficit, borrowBalance);
+        doDyDxFlashLoan(deficit, borrowBalance);
 
     }
 
@@ -399,15 +399,13 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
     }
 
     ///flash loan stuff
-    function doFlashLoan(bool deficit, uint256 amount) internal returns (uint256) {
+    function doDyDxFlashLoan(bool deficit, uint256 amount) internal returns (uint256) {
 
         ISoloMargin solo = ISoloMargin(SOLO);
 
         uint256 marketId = _getMarketIdFromTokenAddress(SOLO, DAI);
         
         IERC20 token = IERC20(DAI);
-        
-        needBackUp = false;
 
         // Not enough DAI in DyDx. So we take all we can
         uint amountInSolo = token.balanceOf(SOLO);
@@ -468,7 +466,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         return _flashBackUpAmount;
     }
 
-    function flashloanBackUp (
+    function doAaveFlashLoan (
         bool deficit,
         uint256 _flashBackUpAmount
     )   public returns (uint256)
