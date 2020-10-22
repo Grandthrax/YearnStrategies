@@ -12,9 +12,7 @@ const ComptrollerI = require("./build/contracts/ComptrollerI.json");
 
 const web3 = new Web3(new Web3("http://127.0.0.1:8545"));
 
-const unlockAddress = "0x7a8edc710ddeadddb0b539de83f3a306a621e823";
-
-const controllerAddress = "0x2be5d998c95de70d9a38b3d78e49751f10f9e88b";
+const unlockAddress = "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8";
 
 const DAI = new web3.eth.Contract(IERC20.abi, addresses.tokens.dai);
 
@@ -28,7 +26,6 @@ const Icompt = new web3.eth.Contract(
 );
 
 const AMOUNT_DEPOSIT_WEI = web3.utils.toWei((500000).toString()); // 500K
-const AMOUNT_WITHDRAW_WEI = web3.utils.toWei((1999.999).toString()); // $1999
 
 const test = async () => {
   try {
@@ -39,7 +36,11 @@ const test = async () => {
       YearnCompDaiStrategy.networks[networkId].address
     );
 
-    // -- Send 500k DAI to the contract for testing deposit() method --
+    /*const AMOUNT_BAL_WHALE = await DAI.methods
+    .balanceOf(unlockAddress)
+    .call();*/
+
+    // -- Send Whale DAI balance to the contract for testing deposit() method --
     await DAI.methods
       .transfer(StrategyContract.options.address, AMOUNT_DEPOSIT_WEI)
       .send({ from: unlockAddress });

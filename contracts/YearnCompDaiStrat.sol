@@ -446,6 +446,19 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         _loanLogic(deficit, amount);
     }
 
+    function _maxLiqAaveAvailable(uint256 _flashBackUpAmount) view internal returns(uint256) {
+
+        //(, uint256 availableLiquidity, , , , , , , , , , ,) = lendingPool.getReserveData(DAI);
+        
+        uint256 availableLiquidity = IERC20(DAI).balanceOf(addressesProvider.getLendingPoolCore());
+
+        if(availableLiquidity < _flashBackUpAmount) {
+            _flashBackUpAmount = availableLiquidity;
+        }
+
+        return _flashBackUpAmount;
+    }
+
     function flashloanBackUp (
         bool deficit,
         uint256 _flashBackUpAmount
@@ -454,7 +467,12 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         bytes memory data = abi.encode(deficit, _flashBackUpAmount);
 
         ILendingPool lendingPool = ILendingPool(addressesProvider.getLendingPool());
-        lendingPool.flashLoan(address(this), DAI, uint(_flashBackUpAmount), data);
+       
+        lendingPool.flashLoan(
+                        address(this), 
+                        DAI, 
+                        uint(_maxLiqAaveAvailable(_flashBackUpAmount)), 
+                        data);
 
         return _flashBackUpAmount;
     }
