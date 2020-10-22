@@ -49,6 +49,9 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     uint256 public minCompToSell = 0.5 ether;
     bool public active = true;
 
+    bool public DyDxActive = true;
+    bool public AaveActive = true;
+
     address public governance;
     address public controller;
     address public strategist;
@@ -134,7 +137,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     // Withdraw partial funds, normally used with a vault withdrawal
     function withdraw(uint256 _amount) external {
-       // require(msg.sender == controller, "!controller");
+        require(msg.sender == controller, "!controller");
 
         uint256 _balance = IERC20(want).balanceOf(address(this));
         if (_balance < _amount) {
@@ -153,7 +156,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
 
     // Withdraw all funds, normally used when migrating strategies
     function withdrawAll() external returns (uint256 balance) {
-       // require(msg.sender == controller, "!controller");
+        require(msg.sender == controller, "!controller");
         _withdrawAll();
 
         balance = IERC20(want).balanceOf(address(this));
@@ -512,6 +515,23 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee {
     function enableLeverage() external {
         require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
         active = true;
+    }
+    function disableDyDx() external {
+        require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
+        DyDxActive = false;
+    }
+    function enableDyDx() external {
+        require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
+        DyDxActive = true;
+    }
+
+    function disableAave() external {
+        require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
+        AaveActive = false;
+    }
+    function enableAave() external {
+        require(msg.sender == governance || msg.sender == strategist, "not governance or strategist");
+        AaveActive = true;
     }
 
 
