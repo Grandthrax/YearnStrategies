@@ -27,6 +27,15 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
     using Address for address;
     using SafeMath for uint256;
 
+    /**
+    * Events Section
+    */
+    
+    /**
+     * @notice Event emitted when trying to do Flash Loan
+     */
+    event Leverage(uint amountRequested, uint amountGiven, bool deficit, address flashLoan);
+
     address public constant want = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
     address public constant DAI = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
     address private constant SOLO = 0x1E0447b19BB6EcFdAe1e4AE1694b0C3659614e4e;
@@ -256,8 +265,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
             //if we are not in deficit we dont need to do flash loan
             while(position >0){
 
-                require(i < 6, "too many iterations. Try smaller withdraw amount");
-                position = _normalDeleverage(position);
+                require(i < 5, "too many iterations. Try smaller withdraw amount");
+                position = position.sub(_normalDeleverage(position));
 
                 i++;
 
@@ -342,11 +351,13 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
          _want.safeApprove(cDAI, deleveragedAmount);
 
         cd.repayBorrow(deleveragedAmount);
+
+        emit Leverage(maxDeleverage, deleveragedAmount, true, address(0));
     }
 
 
     //maxDeleverage is how much we want to reduce by
-    function _normalLeverage(uint256 maxLeverage) internal returns (uint256 deleveragedAmount){
+    function _normalLeverage(uint256 maxLeverage) internal returns (uint256 leveragedAmount){
         require(active, "Leverage Disabled");
         CErc20I cd =CErc20I(cDAI);
          uint lent = cd.balanceOfUnderlying(address(this));
@@ -360,7 +371,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         (, uint collateralFactorMantissa,) = compound.markets(cDAI);
         uint theoreticalBorrow = lent.mul(collateralFactorMantissa).div(1e18);
 
-        uint leveragedAmount = theoreticalBorrow.sub(borrowed);
+        leveragedAmount = theoreticalBorrow.sub(borrowed);
 
         if(leveragedAmount >= maxLeverage){
             leveragedAmount = maxLeverage;
@@ -375,6 +386,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         _want.safeApprove(cDAI, leveragedAmount);
 
         cd.mint(leveragedAmount);
+
+        emit Leverage(maxLeverage, leveragedAmount, false,  address(0));
     }
 
     function balanceC() public view returns (uint256) {
@@ -436,8 +449,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
     }
 
     ///flash loan stuff
-    function doDyDxFlashLoan(bool deficit, uint256 amount) internal returns (uint256) {
-
+    function doDyDxFlashLoan(bool deficit, uint256 amountDesired) internal returns (uint256) {
+        uint amount = amountDesired;
         ISoloMargin solo = ISoloMargin(SOLO);
 
         uint256 marketId = _getMarketIdFromTokenAddress(SOLO, DAI);
@@ -475,6 +488,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
         accountInfos[0] = _getAccountInfo();
 
         solo.operate(accountInfos, operations);
+
+        emit Leverage(amountDesired, amount, deficit, SOLO);
 
         return amount;
      }
@@ -526,6 +541,8 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
                         amount, 
                         data);
 
+        emit Leverage(_flashBackUpAmount, amount, deficit, AAVE_LENDING);
+
     }
 
      function executeOperation(
@@ -556,8 +573,7 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
         compound.claimComp(address(this), tokens);
     }
-
-
+    
     //This function works out what we want to change with our flash loan
     // Input balance is the amount we are going to deposit/withdraw. and dep is whether is this a deposit or withdrawal        
     function _calculateDesiredPosition(uint256 balance, bool dep) internal view returns (uint256 position, bool deficit){
