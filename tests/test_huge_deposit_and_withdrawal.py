@@ -87,6 +87,11 @@ def test_huge_deposit_and_withdrawal(accounts, interface, chain, web3, history, 
             print('target leverage reached')
             break
 
+    blocks_per_year = 2_300_000
+    monthsTillLiquidation = strategy.getblocksUntilLiquidation()/(blocks_per_year/12)
+    print(f'{strategy.getblocksUntilLiquidation()} blocks till liquidation')
+    print(f'{monthsTillLiquidation} months till liquidation')
+
 
     print('\n----whale withdraws large amount----')
    

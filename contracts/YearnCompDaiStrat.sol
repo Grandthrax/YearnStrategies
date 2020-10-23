@@ -668,31 +668,34 @@ contract YearnCompDaiStrategy is DydxFlashloanBase, ICallee, FlashLoanReceiverBa
 
 
     //calculate how many blocks until we are in liquidation based on current interest rates
+    //WARNING does not include compounding so the more blocks the more innacurate
      function getblocksUntilLiquidation() public view returns (uint256 blocks){
-      (uint deposits, uint borrows) = getCurrentPosition();
+         //equation
+         //((deposits*colateralThreshold - borrows) / (borrows*borrowrate - deposits*colateralThreshold*interestrate));
+        
+        (, uint collateralFactorMantissa,) = compound.markets(cDAI);
+        
+        (uint deposits, uint borrows) = getCurrentPosition();
         CErc20I cd =CErc20I(cDAI);
         uint borrrowRate = cd.borrowRatePerBlock();
 
         uint supplyRate = cd.supplyRatePerBlock();
 
-        uint borrowAccural = borrrowRate.mul(borrows);
-        uint supplyAccrual = supplyRate.mul(deposits);
+        uint collateralisedDeposit1 = deposits.mul(collateralFactorMantissa);
+        uint collateralisedDeposit = collateralisedDeposit1.div(1e18);
 
-        //we will never be ion lquidation
-        if(borrowAccural <= supplyAccrual ){
+        uint denom1 = borrows.mul(borrrowRate);
+        uint denom2 =  collateralisedDeposit.mul(supplyRate);
+      
+       
+        //we will never be in lquidation
+        if(denom2 >= denom1 ){
             blocks = uint256(-1);
         }else{
-            uint accrual = borrowAccural.sub(supplyAccrual).div(1e18);
+            uint numer = collateralisedDeposit.sub(borrows);
+            uint denom = denom1.sub(denom2);
 
-            (, uint collateralFactorMantissa,) = compound.markets(cDAI);
-
-            //we are in liquidation when borrows = 75% of deposits 
-            uint amountToGo = (deposits.mul(collateralFactorMantissa).div(1e18)).sub(borrows);
-         
-            blocks = amountToGo.div(accrual);
-
-            //we need to go back to last time interest was accrued
-            blocks = blocks.sub(block.number.sub(cd.accrualBlockNumber()));
+            blocks = numer.mul(1e18).div(denom);
         }
 
 
